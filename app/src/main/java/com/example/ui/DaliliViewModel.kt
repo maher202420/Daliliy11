@@ -37,6 +37,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _currentTheme = MutableStateFlow(getAppTheme())
     val currentTheme = _currentTheme.asStateFlow()
 
+    private val _customAppName = MutableStateFlow(sharedPrefs.getString("custom_app_name", "دليلي - Dalili") ?: "دليلي - Dalili")
+    val customAppName = _customAppName.asStateFlow()
+
+    private val _customAppLogo = MutableStateFlow(sharedPrefs.getString("custom_app_logo", "📡") ?: "📡")
+    val customAppLogo = _customAppLogo.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
 
@@ -166,6 +172,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun setAppTheme(themeId: String) {
         sharedPrefs.edit().putString("app_theme_choice", themeId).apply()
         _currentTheme.value = themeId
+    }
+
+    fun updateAppNameAndLogo(newName: String, newLogo: String) {
+        sharedPrefs.edit()
+            .putString("custom_app_name", newName.trim())
+            .putString("custom_app_logo", newLogo.trim())
+            .apply()
+        _customAppName.value = newName.trim()
+        _customAppLogo.value = newLogo.trim()
     }
 
     fun refreshAll() {

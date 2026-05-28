@@ -316,6 +316,11 @@ fun HomeScreen(
     viewModel: DaliliViewModel
 ) {
     val isOnline by viewModel.isCloudConnected.collectAsState()
+    val customAppNameVal by viewModel.customAppName.collectAsState()
+    val customAppLogoVal by viewModel.customAppLogo.collectAsState()
+    var backdoorClickCount by remember { mutableStateOf(0) }
+    var lastBackdoorClickTime by remember { mutableStateOf(0L) }
+    val context = LocalContext.current
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
     // Filter logic for both sections or providers
@@ -427,14 +432,40 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.width(48.dp))
             }
 
-            // Title "دليلي - Dalili" in Center
-            Text(
-                text = "دليلي - Dalili",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = TextAlign.Center
-            )
+            // Title & logo which allows backdoor access when clicked 5 times
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        val now = System.currentTimeMillis()
+                        if (now - lastBackdoorClickTime < 2500) {
+                            backdoorClickCount++
+                            if (backdoorClickCount >= 5) {
+                                backdoorClickCount = 0
+                                onAdminIconClick()
+                                Toast.makeText(context, "🔓 تم كشف بوابة الدخول الخلفية السرية للوحة التحكم!", Toast.LENGTH_LONG).show()
+                            }
+                        } else {
+                            backdoorClickCount = 1
+                        }
+                        lastBackdoorClickTime = now
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = customAppLogoVal,
+                    fontSize = 24.sp,
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+                Text(
+                    text = customAppNameVal,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+            }
 
             // Admin Dashboard Control Panel Access Action Button
             IconButton(
@@ -1415,6 +1446,12 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
     val currentThemeChoice by viewModel.currentTheme.collectAsState()
     val isOnline by viewModel.isCloudConnected.collectAsState()
 
+    val savedAppName by viewModel.customAppName.collectAsState()
+    val savedAppLogo by viewModel.customAppLogo.collectAsState()
+
+    var appNameInput by remember(savedAppName) { mutableStateOf(savedAppName) }
+    var appLogoInput by remember(savedAppLogo) { mutableStateOf(savedAppLogo) }
+
     var customUrl by remember { mutableStateOf(viewModel.getSupabaseUrl()) }
     var customKey by remember { mutableStateOf(viewModel.getSupabaseKey()) }
 
@@ -1424,6 +1461,71 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.End
     ) {
+        // App Custom Brand Identity Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = "تخصيص هوية واسم التطبيق الشاملة 🏷️",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "يسمح هذا الإعداد بتحديث اسم التطبيق الرئيسي والرمز التعبيري للعلامة فوراً لدى جميع المستخدمين بشكل مباشر وسلس.",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = appNameInput,
+                    onValueChange = { appNameInput = it },
+                    label = { Text("اسم التطبيق المخصص", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                )
+
+                OutlinedTextField(
+                    value = appLogoInput,
+                    onValueChange = { appLogoInput = it },
+                    label = { Text("أيقونة/رمز التطبيق التعبيري (Emoji/Symbol)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                )
+
+                Button(
+                    onClick = {
+                        if (appNameInput.trim().isEmpty() || appLogoInput.trim().isEmpty()) {
+                            Toast.makeText(context, "الرجاء تعبئة الحقول المطلوبة بشكل صحيح!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            viewModel.updateAppNameAndLogo(appNameInput, appLogoInput)
+                            Toast.makeText(context, "تم حفظ وتطبيق هوية التطبيق الجديدة فوراً بنجاح! 🎉", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Done, contentDescription = "حفظ الهوية", tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("حفظ وتطبيق الهوية فوراً", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
         // Theme Colors Choice Card
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
