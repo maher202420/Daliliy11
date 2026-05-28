@@ -32,3 +32,14 @@ data class ServiceProvider(
     @Json(name = "is_active") val isActive: Boolean = true,
     @Json(name = "created_at") val createdAt: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class Review(
+    @Json(name = "id") val id: Int? = null,
+    @Json(name = "provider_id") val providerId: Int,
+    @Json(name = "user_name") val userName: String,
+    @Json(name = "comment") val comment: String,
+    @Json(name = "rating") val rating: Double,
+    @Json(name = "created_at") val createdAt: String? = null
+)
+

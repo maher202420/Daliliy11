@@ -13,6 +13,8 @@ import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -62,7 +64,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
+            val activeTheme by viewModel.currentTheme.collectAsState()
+            MyApplicationTheme(themeChoice = activeTheme) {
                 MainContent(viewModel = viewModel)
             }
         }
@@ -200,14 +203,16 @@ fun MainContent(viewModel: DaliliViewModel) {
                                 onLogoutClick = {
                                     viewModel.logout()
                                     Toast.makeText(context, "تم تسجيل الخروج", Toast.LENGTH_SHORT).show()
-                                }
+                                },
+                                viewModel = viewModel
                             )
                         }
                         is Screen.CategoryDetails -> {
                             CategoryProvidersScreen(
                                 category = targetScreen.category,
                                 allProviders = serviceProviders,
-                                onBackClick = { currentScreen = Screen.Home }
+                                onBackClick = { currentScreen = Screen.Home },
+                                viewModel = viewModel
                             )
                         }
                         is Screen.Login -> {
@@ -307,8 +312,12 @@ fun HomeScreen(
     onCategoryClick: (Category) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onAdminIconClick: () -> Unit,
-    onLogoutClick: () -> Unit
+    onLogoutClick: () -> Unit,
+    viewModel: DaliliViewModel
 ) {
+    val isOnline by viewModel.isCloudConnected.collectAsState()
+    var showDiagnosticsDialog by remember { mutableStateOf(false) }
+
     // Filter logic for both sections or providers
     val filteredCategories = remember(categories, searchQuery) {
         if (searchQuery.trim().isEmpty()) {
@@ -324,6 +333,69 @@ fun HomeScreen(
         if (searchQuery.trim().isEmpty()) 0 else {
             serviceProviders.filter { it.name.contains(searchQuery, ignoreCase = true) }.size
         }
+    }
+
+    if (showDiagnosticsDialog) {
+        val currentUrl = remember { viewModel.getSupabaseUrl() }
+        val currentKey = remember { viewModel.getSupabaseKey() }
+        AlertDialog(
+            onDismissRequest = { showDiagnosticsDialog = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.refreshAll()
+                        showDiagnosticsDialog = false
+                    }
+                ) {
+                    Text("تحديث وفحص مجدداً", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiagnosticsDialog = false }) {
+                    Text("إغلاق")
+                }
+            },
+            icon = {
+                Icon(
+                    imageVector = if (isOnline) Icons.Default.CheckCircle else Icons.Default.Warning,
+                    contentDescription = "اتصال",
+                    tint = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF9800),
+                    modifier = Modifier.size(48.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = if (isOnline) "المزامنة السحابية نشطة ومتصلة" else "التشغيل في الوضع المحلي الهجين",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Text(
+                        text = if (isOnline) 
+                            "التطبيق متصل بقاعدة البيانات السحابية (Supabase) بشكل ممتاز. أي تعديل يتم حفظه في لوحة التحكم يظهر فوراً وبشكل تلقائي لدى جميع مستخدمي التطبيق في ثوانٍ!" 
+                        else 
+                            "يتعذر الاتصال بالخادم السحابي حالياً. يعمل التطبيق بكفاءة كاملة في الوضع المحلي الذكي (Offline Hybrid Cache) بحيث تتصفح جميع الأقسام مسبقة التحميل وتتصل بمقدمي الخدمات بحرية وسرعة فائقة.",
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Right,
+                        lineHeight = 18.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = Color.Gray.copy(alpha = 0.3f))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("معلومات الربط السحابي الحالية للربط:", fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("الرابط: ${currentUrl.substringBefore("/rest/")}", fontSize = 10.sp, color = Color.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("المفتاح: ${currentKey.take(15)}...", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+        )
     }
 
     Column(
@@ -383,8 +455,38 @@ fun HomeScreen(
             fontSize = 13.sp,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(bottom = 8.dp)
         )
+
+        // Connection status pill
+        Row(
+            modifier = Modifier
+                .padding(bottom = 16.dp)
+                .clickable { showDiagnosticsDialog = true }
+                .background(
+                    color = if (isOnline) Color(0xFF4CAF50).copy(alpha = 0.15f) else Color(0xFFFF9800).copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(100.dp)
+                )
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        color = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF9800),
+                        shape = CircleShape
+                    )
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (isOnline) "متزامن سحابياً بالإنترنت 🟢" else "تصفح أوفلاين محلي 🟠 (اضغط للفحص)",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF9800)
+            )
+        }
 
         // Search text field
         TextField(
@@ -561,10 +663,12 @@ fun CategoryCardItem(category: Category, onClick: () -> Unit) {
 fun CategoryProvidersScreen(
     category: Category,
     allProviders: List<ServiceProvider>,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    viewModel: DaliliViewModel
 ) {
     val context = LocalContext.current
     var qInput by remember { mutableStateOf("") }
+    var activeProviderReviewsTarget by remember { mutableStateOf<ServiceProvider?>(null) }
     
     // Filter byCategory ID & Filter query name
     val filteredList = remember(allProviders, category.id, qInput) {
@@ -573,6 +677,283 @@ fun CategoryProvidersScreen(
             it.isActive &&
             (qInput.isEmpty() || it.name.contains(qInput, ignoreCase = true) || it.phone.contains(qInput, ignoreCase = true))
         }
+    }
+
+    if (activeProviderReviewsTarget != null) {
+        val provider = activeProviderReviewsTarget!!
+        val reviewsState by viewModel.reviews.collectAsState()
+        val providerReviews = remember(reviewsState, provider.id) {
+            reviewsState.filter { it.providerId == provider.id }
+        }
+        val currentUser by viewModel.currentUser.collectAsState()
+        val isAdmin = currentUser != null
+
+        var reviewerName by remember { mutableStateOf("") }
+        var reviewComment by remember { mutableStateOf("") }
+        var selectedRatingStars by remember { mutableStateOf(5.0) }
+        var reviewErrorHint by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { activeProviderReviewsTarget = null },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { activeProviderReviewsTarget = null }) {
+                    Text("إغلاق", fontWeight = FontWeight.Bold)
+                }
+            },
+            title = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Text(
+                        text = provider.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Right
+                    )
+                    Text(
+                        text = "تقييمات وآراء العملاء للخدمة",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Right
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    // Overall average card
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            val averageText = if (providerReviews.isEmpty()) provider.rating.toString() else {
+                                val avg = providerReviews.map { it.rating }.average()
+                                String.format("%.1f", avg)
+                            }
+                            Text(
+                                text = "⭐ $averageText / 5.0",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = "بناءً على ${providerReviews.size} مراجعة مسجّلة",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+
+                    // Reviews feed list
+                    Text(
+                        text = "آراء العملاء المكتوبة:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+
+                    if (providerReviews.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "لا توجد تعليقات بعد لهذا مقدم الخدمة. كن أول من يضيف تعليقك!",
+                                fontSize = 11.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        providerReviews.forEach { review ->
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    horizontalAlignment = Alignment.End
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Trash bin for quick deletion by Admin
+                                        if (isAdmin) {
+                                            IconButton(
+                                                onClick = {
+                                                    review.id?.let { rId ->
+                                                        viewModel.deleteReview(rId) { res ->
+                                                            if (res) {
+                                                                Toast.makeText(context, "تم حذف تعليق العميل بنجاح", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "حذف التعليق",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.width(1.dp))
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "⭐ ${review.rating}",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                                modifier = Modifier.padding(end = 6.dp)
+                                            )
+                                            Text(
+                                                text = review.userName,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                textAlign = TextAlign.End
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = review.comment,
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                                        modifier = Modifier.padding(top = 4.dp),
+                                        textAlign = TextAlign.End
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = Color.LightGray.copy(alpha = 0.2f))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Comment Submission Form
+                    Text(
+                        text = "شارك رأيك وقيم مقدم المهنة:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    // Clickable Interactive Yellow Star Selector Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("مستوى التقييم بالنجوم:", fontSize = 11.sp, modifier = Modifier.padding(end = 8.dp))
+                        repeat(5) { index ->
+                            val starValue = index + 1.0
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "تقييم بالنجوم",
+                                tint = if (selectedRatingStars >= starValue) MaterialTheme.colorScheme.secondary else Color.LightGray,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clickable { selectedRatingStars = starValue }
+                            )
+                        }
+                    }
+
+                    // Author Name Input (Styled Outlined RTL)
+                    OutlinedTextField(
+                        value = reviewerName,
+                        onValueChange = { reviewerName = it },
+                        label = { Text("اسمك الكريم", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.End, textDirection = TextDirection.Rtl)
+                    )
+
+                    // Comment Area Input (Styled Outlined RTL)
+                    OutlinedTextField(
+                        value = reviewComment,
+                        onValueChange = { reviewComment = it },
+                        label = { Text("اكتب مراجعة عملك أو تعليقك هنا...", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                        maxLines = 3,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.End, textDirection = TextDirection.Rtl)
+                    )
+
+                    if (reviewErrorHint != null) {
+                        Text(
+                            text = reviewErrorHint!!,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                            textAlign = TextAlign.End
+                        )
+                    }
+
+                    // Send Button
+                    Button(
+                        onClick = {
+                            if (reviewerName.trim().isEmpty() || reviewComment.trim().isEmpty()) {
+                                reviewErrorHint = "الرجاء تعبئة اسمك الكريم ومربع التعليق!"
+                            } else {
+                                reviewErrorHint = null
+                                viewModel.addReview(
+                                    providerId = provider.id ?: 0,
+                                    userName = reviewerName.trim(),
+                                    comment = reviewComment.trim(),
+                                    rating = selectedRatingStars
+                                ) { ok ->
+                                    if (ok) {
+                                        reviewerName = ""
+                                        reviewComment = ""
+                                        selectedRatingStars = 5.0
+                                        Toast.makeText(context, "شكرًا لك! تم نشر مراجعتك بنجاح", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("إرسال التقييم والتعليق", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+        )
     }
 
     Column(
@@ -666,7 +1047,11 @@ fun CategoryProvidersScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(filteredList, key = { it.id ?: 0 }) { provider ->
-                    ProviderCardRow(provider = provider, context = context)
+                    ProviderCardRow(
+                        provider = provider, 
+                        context = context,
+                        onClick = { activeProviderReviewsTarget = provider }
+                    )
                 }
             }
         }
@@ -677,8 +1062,9 @@ fun CategoryProvidersScreen(
 // 【5. SERVICE PROVIDER ROW COMPOSABLE】
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @Composable
-fun ProviderCardRow(provider: ServiceProvider, context: Context) {
+fun ProviderCardRow(provider: ServiceProvider, context: Context, onClick: () -> Unit) {
     Card(
+        onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier
             .fillMaxWidth()
@@ -778,6 +1164,13 @@ fun ProviderCardRow(provider: ServiceProvider, context: Context) {
                             modifier = Modifier.size(14.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "${provider.rating}",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Gray
+                    )
                 }
             }
 
@@ -937,10 +1330,10 @@ fun AdminDashboardScreen(
     onBackClick: () -> Unit
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    // Tab list (super_admin has 3 tabs, standard admin has 2)
+    // Tab list (super_admin has 4 tabs, standard admin has 2)
     val isSuperAdmin = currentUser.role == "super_admin" || currentUser.username == "admin"
     val tabs = if (isSuperAdmin) {
-        listOf("المشرفون", "الأقسام", "مقدمو الخدمات")
+        listOf("المشرفون", "الأقسام", "مقدمو الخدمات", "الإعدادات")
     } else {
         listOf("الأقسام", "مقدمو الخدمات")
     }
@@ -1004,11 +1397,212 @@ fun AdminDashboardScreen(
                     0 -> AdminsManagementSubscreen(admins = admins, viewModel = viewModel)
                     1 -> CategoriesManagementSubscreen(categories = categories, viewModel = viewModel)
                     2 -> ProvidersManagementSubscreen(providers = serviceProviders, categories = categories, viewModel = viewModel)
+                    3 -> SettingsManagementSubscreen(viewModel = viewModel)
                 }
             } else {
                 when (selectedTab) {
                     0 -> CategoriesManagementSubscreen(categories = categories, viewModel = viewModel)
                     1 -> ProvidersManagementSubscreen(providers = serviceProviders, categories = categories, viewModel = viewModel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
+    val context = LocalContext.current
+    val currentThemeChoice by viewModel.currentTheme.collectAsState()
+    val isOnline by viewModel.isCloudConnected.collectAsState()
+
+    var customUrl by remember { mutableStateOf(viewModel.getSupabaseUrl()) }
+    var customKey by remember { mutableStateOf(viewModel.getSupabaseKey()) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.End
+    ) {
+        // Theme Colors Choice Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = "تخصيص هوية التطبيق والألوان 🎨",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "اختر الهوية البصرية التي تناسب ذوق عملائك. يتغير مظهر التطبيق بالكامل فوراً وبأعلى دقة.",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                val themeOptions = listOf(
+                    Triple("red_black", "الهوية الملكية (أحمر وأسود 🔴🖤)", listOf(Color(0xFFE53935), Color(0xFF121212))),
+                    Triple("slate_silver", "الحديثة الهادئة (فضي 🔵🩶)", listOf(Color(0xFF2196F3), Color(0xFFB0BEC5))),
+                    Triple("emerald_green", "الواحة الخضراء (أخضر زاهي 🟢💚)", listOf(Color(0xFF2E7D32), Color(0xFFA5D6A7))),
+                    Triple("royal_indigo", "الغسق الكوني (بنفسجي وأزرق 🟣💙)", listOf(Color(0xFF673AB7), Color(0xFF42A5F5)))
+                )
+
+                themeOptions.forEach { (themeId, label, swatches) ->
+                    val isSelected = currentThemeChoice == themeId
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                viewModel.setAppTheme(themeId)
+                                Toast.makeText(context, "تم تطبيق السمة الجديدة بنجاح!", Toast.LENGTH_SHORT).show()
+                            }
+                            .background(
+                                color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        // Color Swatches
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(end = 12.dp)
+                        ) {
+                            swatches.forEach { color ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .background(color, CircleShape)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = label,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Right,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = {
+                                viewModel.setAppTheme(themeId)
+                                Toast.makeText(context, "تم تطبيق السمة الجديدة بنجاح!", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Supabase Cloud Configuration Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = "رابط التوازن السحابي (Supabase) 🌐",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "يرتبط التطبيق بقاعدتك السحابية مباشرة. يمكنك تعديل الرابط أو تبديل المشغل في أي وقت وسيربط التطبيق نفسه تلقائياً دون الحاجة إلى تحديث متجر التطبيقات!",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = customUrl,
+                    onValueChange = { customUrl = it },
+                    label = { Text("Supabase URL (رابط المشروع السحابي)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Left)
+                )
+
+                OutlinedTextField(
+                    value = customKey,
+                    onValueChange = { customKey = it },
+                    label = { Text("Anon/Publishable Key (مفتاح المشروع المشترك)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Left)
+                )
+
+                Button(
+                    onClick = {
+                        if (customUrl.trim().isEmpty() || customKey.trim().isEmpty()) {
+                            Toast.makeText(context, "الرجاء كتابة الرابط ومفتاح الاتصال بشكل صحيح!", Toast.LENGTH_LONG).show()
+                        } else {
+                            viewModel.updateSupabaseConfig(customUrl.trim(), customKey.trim()) { success ->
+                                if (success) {
+                                    viewModel.refreshAll()
+                                }
+                            }
+                            Toast.makeText(context, "تم تحديث إعدادات الاتصال بنجاح! يتم الآن إعادة الربط والمزامنة السحابية الفورية...", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "حفظ وإعادة مزامنة", tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("حفظ وإعادة الاتصال السحابي السريع", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Connection diagnostics checklist
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = if (isOnline) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            text = if (isOnline) 
+                                "حالة الربط: خادم سحابي نشط ومتزامن بنجاح عبر الإنترنت ✅" 
+                            else 
+                                "حالة الربط: خادم متوقف أو معطل، يعمل محلياً في وضع الحماية ❌",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isOnline) Color(0xFF2E7D32) else Color(0xFFE65100),
+                            textAlign = TextAlign.Right,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }

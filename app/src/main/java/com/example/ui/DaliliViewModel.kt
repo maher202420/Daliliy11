@@ -25,11 +25,17 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _serviceProviders = MutableStateFlow<List<ServiceProvider>>(emptyList())
     val serviceProviders = _serviceProviders.asStateFlow()
 
+    private val _reviews = MutableStateFlow<List<Review>>(emptyList())
+    val reviews = _reviews.asStateFlow()
+
     private val _admins = MutableStateFlow<List<Admin>>(emptyList())
     val admins = _admins.asStateFlow()
 
     private val _currentUser = MutableStateFlow<Admin?>(null)
     val currentUser = _currentUser.asStateFlow()
+
+    private val _currentTheme = MutableStateFlow(getAppTheme())
+    val currentTheme = _currentTheme.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
@@ -37,12 +43,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage = _errorMessage.asStateFlow()
 
+    private val _isCloudConnected = MutableStateFlow(true)
+    val isCloudConnected = _isCloudConnected.asStateFlow()
+
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
     private var realtimeClient: RealtimeClient? = null
 
-    // Moshi serializers for caching lists securely to SharedPreferences
+    // Moshi serializers for caching lists database states securely to SharedPreferences
     private val moshi = Moshi.Builder()
         .addLast(KotlinJsonAdapterFactory())
         .build()
@@ -57,12 +66,22 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         moshi.adapter<List<ServiceProvider>>(type)
     }
 
+    private val reviewsAdapter by lazy {
+        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Review::class.java)
+        moshi.adapter<List<Review>>(type)
+    }
+
     private val adminsAdapter by lazy {
         val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
         moshi.adapter<List<Admin>>(type)
     }
 
     init {
+        // Load custom saved Supabase project credentials if found, otherwise use initial default coordinates
+        val savedBaseUrl = sharedPrefs.getString("custom_supabase_url", "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/") ?: "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/"
+        val savedApiKey = sharedPrefs.getString("custom_supabase_key", "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx") ?: "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx"
+        SupabaseClient.updateConfig(savedBaseUrl, savedApiKey)
+
         // Recover logged in user session if present
         val savedUsername = sharedPrefs.getString("saved_username", null)
         val savedRole = sharedPrefs.getString("saved_role", null)
@@ -77,18 +96,19 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         // Load Cached lists or Local Arabian Defaults state so the screen is never blank on boot!
         _categories.value = loadCategoriesCache()
         _serviceProviders.value = loadProvidersCache()
+        _reviews.value = loadReviewsCache()
         _admins.value = loadAdminsCache()
 
-        // Initialize Realtime WebSocket Sync
+        // Initialize Realtime WebSocket Sync with Hot reload dynamic properties
         realtimeClient = RealtimeClient {
             refreshDataSilent()
         }
         realtimeClient?.start()
 
-        // Initial live server fetch
+        // Initial live server fetch over cloud
         refreshAll()
 
-        // Start safety periodic refresh (fallback in case socket drops)
+        // Start safety periodic refresh (fallback in case web socket drops out of boundary)
         viewModelScope.launch {
             while (true) {
                 delay(12000) // 12 seconds
@@ -110,6 +130,44 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         _errorMessage.value = null
     }
 
+    // GET / SET SUPABASE DYNAMIC CONFIGS
+    fun getSupabaseUrl(): String {
+        return sharedPrefs.getString("custom_supabase_url", "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/") ?: "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/"
+    }
+
+    fun getSupabaseKey(): String {
+        return sharedPrefs.getString("custom_supabase_key", "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx") ?: "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx"
+    }
+
+    fun updateSupabaseConfig(newUrl: String, newKey: String, onComplete: (Boolean) -> Unit) {
+        sharedPrefs.edit()
+            .putString("custom_supabase_url", newUrl.trim())
+            .putString("custom_supabase_key", newKey.trim())
+            .apply()
+
+        SupabaseClient.updateConfig(newUrl.trim(), newKey.trim())
+
+        // Reconnect realtime WebSocket synchronization dynamically
+        realtimeClient?.stop()
+        realtimeClient = RealtimeClient {
+            refreshDataSilent()
+        }
+        realtimeClient?.start()
+
+        refreshAll()
+        onComplete(true)
+    }
+
+    // GET / SET DYNAMIC COMPOSABLE SYSTEM THEME
+    fun getAppTheme(): String {
+        return sharedPrefs.getString("app_theme_choice", "red_black") ?: "red_black"
+    }
+
+    fun setAppTheme(themeId: String) {
+        sharedPrefs.edit().putString("app_theme_choice", themeId).apply()
+        _currentTheme.value = themeId
+    }
+
     fun refreshAll() {
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
@@ -117,13 +175,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 fetchCategories()
                 fetchServiceProviders()
+                fetchReviews()
                 if (_currentUser.value?.role == "super_admin") {
                     fetchAdmins()
                 }
+                _isCloudConnected.value = true
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Error refreshing data", e)
-                // Do not clear the list, just show a message to notify them but keep displaying cached items
-                _errorMessage.value = "ملاحظة: تصفح أوفلاين (خطأ بالاتصال: ${e.localizedMessage})"
+                _isCloudConnected.value = false
+                _errorMessage.value = "الوضع المحلي النشط: خطأ بالاتصال بالخادم السحابي"
             } finally {
                 _isLoading.value = false
             }
@@ -135,11 +195,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 fetchCategories()
                 fetchServiceProviders()
+                fetchReviews()
                 if (_currentUser.value?.role == "super_admin") {
                     fetchAdmins()
                 }
+                _isCloudConnected.value = true
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Silent refresh failed (offline mode)", e)
+                _isCloudConnected.value = false
             }
         }
     }
@@ -168,6 +231,18 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Exception) {
             Log.e("DaliliViewModel", "Failed to get service providers from server", e)
             throw e
+        }
+    }
+
+    private suspend fun fetchReviews() {
+        try {
+            val fetched = SupabaseClient.api.getReviews()
+            if (fetched.isNotEmpty()) {
+                _reviews.value = fetched
+                saveReviewsCache(fetched)
+            }
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Failed to fetch reviews", e)
         }
     }
 
@@ -244,7 +319,18 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun logout() {
         _currentUser.value = null
         _admins.value = emptyList()
+        val customUrl = getSupabaseUrl()
+        val customKey = getSupabaseKey()
+        val theme = getAppTheme()
+
         sharedPrefs.edit().clear().apply()
+
+        // Keep connection credentials on logout so admin does not lose connection coordinates
+        sharedPrefs.edit()
+            .putString("custom_supabase_url", customUrl)
+            .putString("custom_supabase_key", customKey)
+            .putString("app_theme_choice", theme)
+            .apply()
     }
 
     private fun persistSession(admin: Admin) {
@@ -270,7 +356,6 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     role = "admin"
                 )
 
-                // Try uploading to cloud first
                 try {
                     SupabaseClient.api.createAdmin(newAdmin)
                 } catch (apiError: Exception) {
@@ -282,7 +367,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
                 // Ensure local data state is fully modified offline-ready
                 val currentList = _admins.value.toMutableList()
-                val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 10) + 1
+                val nextId = (currentList.map { it.id ?: 0 }.maxOrNull() ?: 10) + 1
                 currentList.add(newAdmin.copy(id = nextId))
                 _admins.value = currentList
                 saveAdminsCache(currentList)
@@ -360,6 +445,95 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // REVIEWS AND RATINGS MANAGEMENT
+    fun addReview(providerId: Int, userName: String, comment: String, rating: Double, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val review = Review(
+                    providerId = providerId,
+                    userName = userName,
+                    comment = comment,
+                    rating = rating
+                )
+                try {
+                    SupabaseClient.api.createReview(review)
+                } catch (e: Exception) {
+                    Log.e("DaliliViewModel", "Remote submit review failed, fallback locale", e)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم إضافة التعليق والتقييم محلياً بنجاح"
+                    }
+                }
+
+                // Backup local reviews lists
+                val currentList = _reviews.value.toMutableList()
+                val nextId = (currentList.map { it.id ?: 0 }.maxOrNull() ?: 3000) + 1
+                currentList.add(0, review.copy(id = nextId))
+                _reviews.value = currentList
+                saveReviewsCache(currentList)
+
+                // Update ratings on active providers lists
+                recalculateAndSaveProviderRating(providerId)
+
+                fetchReviews()
+                handlerSuccessOnMain { onComplete(true) }
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Add review error", e)
+                handlerSuccessOnMain { onComplete(false) }
+            }
+        }
+    }
+
+    fun deleteReview(reviewId: Int, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isLoading.value = true
+            try {
+                try {
+                    SupabaseClient.api.deleteReview("eq.$reviewId")
+                } catch (e: Exception) {
+                    Log.e("DaliliViewModel", "Remote deleteReview failed, fallback wipe locale", e)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم حذف التعليق محلياً بنجاح"
+                    }
+                }
+
+                val reviewTarget = _reviews.value.firstOrNull { it.id == reviewId }
+                val currentList = _reviews.value.filter { it.id != reviewId }
+                _reviews.value = currentList
+                saveReviewsCache(currentList)
+
+                if (reviewTarget != null) {
+                    recalculateAndSaveProviderRating(reviewTarget.providerId)
+                }
+
+                fetchReviews()
+                handlerSuccessOnMain { onComplete(true) }
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Delete review error", e)
+                handlerSuccessOnMain { onComplete(false) }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    private fun recalculateAndSaveProviderRating(providerId: Int) {
+        val matchingReviews = _reviews.value.filter { it.providerId == providerId }
+        val finalRating = if (matchingReviews.isEmpty()) {
+            5.0
+        } else {
+            val avg = matchingReviews.map { it.rating }.average()
+            String.format("%.1f", avg).toDoubleOrNull() ?: 5.0
+        }
+
+        val updatedProviders = _serviceProviders.value.map {
+            if (it.id == providerId) {
+                it.copy(rating = finalRating)
+            } else it
+        }
+        _serviceProviders.value = updatedProviders
+        saveProvidersCache(updatedProviders)
+    }
+
     // MANAGE CATEGORIES (Admins and Super Admins)
     fun addCategory(nameAr: String, icon: String, orderIndex: Int, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -380,7 +554,6 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
 
-                // Store locally and update state flows dynamically
                 val currentList = _categories.value.toMutableList()
                 val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 1000) + 1
                 currentList.add(category.copy(id = nextId))
@@ -417,7 +590,6 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
 
-                // Store locally and update state flows dynamically
                 val currentList = _categories.value.map {
                     if (it.id == categoryId) {
                         it.copy(nameAr = nameAr, icon = icon, orderIndex = orderIndex)
@@ -494,7 +666,6 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
 
-                // Update local configuration state lists
                 val currentList = _serviceProviders.value.toMutableList()
                 val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
                 currentList.add(provider.copy(id = nextId))
@@ -587,7 +758,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // LOCAL JSON PARSERS (Saves lists directly as json text)
+    // CACHING UTILITIES
     private fun saveCategoriesCache(list: List<Category>) {
         try {
             val json = categoriesAdapter.toJson(list)
@@ -630,6 +801,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         return getDefaultProviders()
     }
 
+    private fun saveReviewsCache(list: List<Review>) {
+        try {
+            val json = reviewsAdapter.toJson(list)
+            sharedPrefs.edit().putString("cache_reviews", json).apply()
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Write reviews cache failed", e)
+        }
+    }
+
+    private fun loadReviewsCache(): List<Review> {
+        val json = sharedPrefs.getString("cache_reviews", null)
+        if (json != null) {
+            try {
+                return reviewsAdapter.fromJson(json) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Read reviews cache failed", e)
+            }
+        }
+        return getDefaultReviews()
+    }
+
     private fun saveAdminsCache(list: List<Admin>) {
         try {
             val json = adminsAdapter.toJson(list)
@@ -651,28 +843,38 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         return emptyList()
     }
 
-    // Default Pre-loaded arabian services for a flawless first run offline!
     private fun getDefaultCategories(): List<Category> {
         return listOf(
-            Category(id = 1001, nameAr = "خدمات الاتصالات", icon = "📱", orderIndex = 1),
-            Category(id = 1002, nameAr = "الطوارئ العامة", icon = "⚡", orderIndex = 2),
-            Category(id = 1003, nameAr = "الصحة والطب", icon = "🩺", orderIndex = 3),
-            Category(id = 1004, nameAr = "سيارات وأجرة", icon = "🚕", orderIndex = 4),
-            Category(id = 1005, nameAr = "الصيانة المنزلية", icon = "🛠️", orderIndex = 5)
+            Category(id = 1001, nameAr = "خدمات الاتصالات والنت", icon = "📱", orderIndex = 1),
+            Category(id = 1002, nameAr = "الهندسة والصيانة المنزلية", icon = "🛠️", orderIndex = 2),
+            Category(id = 1003, nameAr = "الطب والتمريض والعيادات", icon = "🩺", orderIndex = 3),
+            Category(id = 1004, nameAr = "سيارات وسائقين وأجرة", icon = "🚕", orderIndex = 4),
+            Category(id = 1005, nameAr = "خدمات التعليم والتدريس", icon = "📚", orderIndex = 5),
+            Category(id = 1006, nameAr = "خدمات الطعام وتوصيل الطلبات", icon = "🍕", orderIndex = 6)
         )
     }
 
     private fun getDefaultProviders(): List<ServiceProvider> {
         return listOf(
-            ServiceProvider(id = 2001, name = "مؤسسة الاتصالات والإنترنت", phone = "777644670", categoryId = 1001, rating = 5.0, isActive = true),
-            ServiceProvider(id = 2002, name = "طوارئ الكهرباء والمياه", phone = "191", categoryId = 1002, rating = 5.0, isActive = true),
-            ServiceProvider(id = 2003, name = "الهلال الأحمر والإسعاف", phone = "199", categoryId = 1003, rating = 5.0, isActive = true),
-            ServiceProvider(id = 2004, name = "تاكسي المشوار السريع", phone = "777644670", categoryId = 1004, rating = 4.5, isActive = true),
-            ServiceProvider(id = 2005, name = "خدمات السباكة والكهرباء المنزلية", phone = "777644670", categoryId = 1005, rating = 4.8, isActive = true)
+            ServiceProvider(id = 2001, name = "مؤسسة الاتصالات والشبكات والإنترنت المتكاملة", phone = "777644670", categoryId = 1001, rating = 5.0, imageUrl = "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c", isActive = true),
+            ServiceProvider(id = 2002, name = "المهندس أحمد لصيانة التكييف والأجهزة المنزلية", phone = "711223344", categoryId = 1002, rating = 4.8, imageUrl = "https://images.unsplash.com/photo-1581092160607-ee22621dd758", isActive = true),
+            ServiceProvider(id = 2003, name = "أخصائي الطقس والتمريض المنزلي السريع", phone = "770011223", categoryId = 1003, rating = 5.0, imageUrl = "https://images.unsplash.com/photo-1559839734-2b71ea197ec2", isActive = true),
+            ServiceProvider(id = 2004, name = "تاكسي المشوار السريع للتنقل والرحلات", phone = "777644670", categoryId = 1004, rating = 4.9, imageUrl = "https://images.unsplash.com/photo-1549417229-aa67d3263c09", isActive = true),
+            ServiceProvider(id = 2005, name = "أستاذ الرياضيات والفيزياء الخصوصي", phone = "733445566", categoryId = 1005, rating = 4.7, imageUrl = "https://images.unsplash.com/photo-1434030216411-0b793f4b4173", isActive = true),
+            ServiceProvider(id = 2006, name = "مطعم الطاهي اليمني للوجبات السريعة والتوصيل", phone = "775566778", categoryId = 1006, rating = 4.6, imageUrl = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38", isActive = true)
         )
     }
 
-    // Hashing helper
+    private fun getDefaultReviews(): List<Review> {
+        return listOf(
+            Review(id = 3001, providerId = 2001, userName = "أبو ماجد", comment = "خدمة ممتازة وسريعة، وتغطية شبكة جيدة جداً في كل المناطق.", rating = 5.0, createdAt = "2026-05-27T10:00:00Z"),
+            Review(id = 3002, providerId = 2001, userName = "فيصل الحربي", comment = "الدعم الفني متعاون للغاية وسرعة في استجابة المشكلات.", rating = 4.0, createdAt = "2026-05-27T12:30:00Z"),
+            Review(id = 3003, providerId = 2003, userName = "د. علي الخالدي", comment = "أبطال الإسعاف، استجابة سريعة جداً في وقت الطوارئ شكراً لكم.", rating = 5.0, createdAt = "2026-05-27T11:15:00Z"),
+            Review(id = 3004, providerId = 2004, userName = "سارة أحمد", comment = "سائق محترم والسيارة نظيفة ووصلت بالوقت المحدد.", rating = 5.0, createdAt = "2026-05-27T14:45:00Z")
+        )
+    }
+
+    // SHA-256 Hashing helper
     private fun hashPasswordHelper(password: String): String {
         return try {
             val digest = MessageDigest.getInstance("SHA-256")

@@ -75,4 +75,22 @@ interface SupabaseApi {
     suspend fun deleteServiceProvider(
         @Query("id") idFilter: String
     ): Response<Unit>
+
+    // REVIEWS & RATINGS
+    @GET("reviews")
+    suspend fun getReviews(
+        @Query("select") select: String = "*",
+        @Query("order") order: String = "created_at.desc"
+    ): List<Review>
+
+    @POST("reviews")
+    @Headers("Prefer: return=representation")
+    suspend fun createReview(
+        @Body review: Review
+    ): List<Review>
+
+    @DELETE("reviews")
+    suspend fun deleteReview(
+        @Query("id") idFilter: String
+    ): Response<Unit>
 }

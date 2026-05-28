@@ -34,7 +34,11 @@ class RealtimeClient(private val onChangeReceived: () -> Unit) {
 
     private fun connect() {
         if (!isRunning) return
-        val url = "wss://sazbudkuzxbvmuztaxeg.supabase.co/realtime/v1/websocket?apikey=${SupabaseClient.API_KEY}&vsn=1.0.0"
+        val domain = SupabaseClient.currentUrl
+            .replace("https://", "")
+            .replace("http://", "")
+            .substringBefore("/")
+        val url = "wss://$domain/realtime/v1/websocket?apikey=${SupabaseClient.currentApiKey}&vsn=1.0.0"
         val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
