@@ -4,10 +4,15 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Beautiful circular badge in deep vibrant red -->
     <path
-        android:pathData="M65,36 C54,36 44,45 44,56 C44,67 52,72 68,72"
+        android:fillColor="#E53935"
+        android:pathData="M54,54m-30,0a30,30 0,1,1 60,0a30,30 0,1,1 -60,0" />
+    <!-- White stylish calligraphy 'د' for Dalili -->
+    <path
+        android:pathData="M64,38 C55,38 46,45 46,55 C46,65 52,68 64,68"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="11"
+        android:strokeWidth="8"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />

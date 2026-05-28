@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +42,26 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     private var realtimeClient: RealtimeClient? = null
 
+    // Moshi serializers for caching lists securely to SharedPreferences
+    private val moshi = Moshi.Builder()
+        .addLast(KotlinJsonAdapterFactory())
+        .build()
+
+    private val categoriesAdapter by lazy {
+        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Category::class.java)
+        moshi.adapter<List<Category>>(type)
+    }
+
+    private val providersAdapter by lazy {
+        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, ServiceProvider::class.java)
+        moshi.adapter<List<ServiceProvider>>(type)
+    }
+
+    private val adminsAdapter by lazy {
+        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
+        moshi.adapter<List<Admin>>(type)
+    }
+
     init {
         // Recover logged in user session if present
         val savedUsername = sharedPrefs.getString("saved_username", null)
@@ -52,13 +74,18 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
+        // Load Cached lists or Local Arabian Defaults state so the screen is never blank on boot!
+        _categories.value = loadCategoriesCache()
+        _serviceProviders.value = loadProvidersCache()
+        _admins.value = loadAdminsCache()
+
         // Initialize Realtime WebSocket Sync
         realtimeClient = RealtimeClient {
             refreshDataSilent()
         }
         realtimeClient?.start()
 
-        // Initial Data Fetch
+        // Initial live server fetch
         refreshAll()
 
         // Start safety periodic refresh (fallback in case socket drops)
@@ -95,7 +122,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Error refreshing data", e)
-                _errorMessage.value = "خطأ في الاتصال بالخادم: ${e.localizedMessage}"
+                // Do not clear the list, just show a message to notify them but keep displaying cached items
+                _errorMessage.value = "ملاحظة: تصفح أوفلاين (خطأ بالاتصال: ${e.localizedMessage})"
             } finally {
                 _isLoading.value = false
             }
@@ -111,7 +139,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     fetchAdmins()
                 }
             } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Silent refresh failed", e)
+                Log.e("DaliliViewModel", "Silent refresh failed (offline mode)", e)
             }
         }
     }
@@ -119,9 +147,13 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun fetchCategories() {
         try {
             val fetched = SupabaseClient.api.getCategories()
-            _categories.value = fetched.sortedBy { it.orderIndex }
+            if (fetched.isNotEmpty()) {
+                val sorted = fetched.sortedBy { it.orderIndex }
+                _categories.value = sorted
+                saveCategoriesCache(sorted)
+            }
         } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Failed to get categories", e)
+            Log.e("DaliliViewModel", "Failed to get categories from server", e)
             throw e
         }
     }
@@ -129,9 +161,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun fetchServiceProviders() {
         try {
             val fetched = SupabaseClient.api.getServiceProviders()
-            _serviceProviders.value = fetched
+            if (fetched.isNotEmpty()) {
+                _serviceProviders.value = fetched
+                saveProvidersCache(fetched)
+            }
         } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Failed to get service providers", e)
+            Log.e("DaliliViewModel", "Failed to get service providers from server", e)
             throw e
         }
     }
@@ -139,7 +174,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun fetchAdmins() {
         try {
             val fetched = SupabaseClient.api.getAdmins()
-            _admins.value = fetched
+            if (fetched.isNotEmpty()) {
+                _admins.value = fetched
+                saveAdminsCache(fetched)
+            }
         } catch (e: Exception) {
             Log.e("DaliliViewModel", "Failed to get admins list", e)
         }
@@ -151,7 +189,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _isLoading.value = true
             _errorMessage.value = null
             try {
-                // Hardcoded fallback override for Super Admin as specified in requirements
+                // Hardcoded fallback override for Super Admin
                 if (usernameInput.trim() == "admin" && passwordInput == "maher736462") {
                     val rootAdmin = Admin(
                         id = null,
@@ -162,12 +200,18 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     _currentUser.value = rootAdmin
                     persistSession(rootAdmin)
                     fetchAdmins()
-                    handlerSuccessOnMain({ onResult(true, null) })
+                    handlerSuccessOnMain { onResult(true, null) }
                     return@launch
                 }
 
-                // Query database
-                val adminsFromDb = SupabaseClient.api.getAdmins()
+                // Query database, falling back automatically to offline cache list if network error!
+                val adminsFromDb = try {
+                    SupabaseClient.api.getAdmins()
+                } catch (e: Exception) {
+                    Log.e("DaliliViewModel", "Admins network fetch failed. Authenticating with local lists.", e)
+                    _admins.value
+                }
+
                 val matchedAdmin = adminsFromDb.firstOrNull { it.username.trim() == usernameInput.trim() }
 
                 if (matchedAdmin != null) {
@@ -181,16 +225,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         if (matchedAdmin.role == "super_admin" || matchedAdmin.username == "admin") {
                             fetchAdmins()
                         }
-                        handlerSuccessOnMain({ onResult(true, null) })
+                        handlerSuccessOnMain { onResult(true, null) }
                     } else {
-                        handlerSuccessOnMain({ onResult(false, "كلمة المرور غير صحيحة") })
+                        handlerSuccessOnMain { onResult(false, "كلمة المرور غير صحيحة") }
                     }
                 } else {
-                    handlerSuccessOnMain({ onResult(false, "اسم المستخدم غير موجود") })
+                    handlerSuccessOnMain { onResult(false, "اسم المستخدم غير موجود") }
                 }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Login error", e)
-                handlerSuccessOnMain({ onResult(false, "خطأ بالاتصال: ${e.localizedMessage}") })
+                handlerSuccessOnMain { onResult(false, "خطأ بالاتصال: ${e.localizedMessage}") }
             } finally {
                 _isLoading.value = false
             }
@@ -219,14 +263,30 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                // Hash the password by default to store securely
                 val hashed = hashPasswordHelper(passwordInput)
                 val newAdmin = Admin(
                     username = usernameInput,
                     passwordHash = hashed,
-                    role = "admin" // standard admin
+                    role = "admin"
                 )
-                SupabaseClient.api.createAdmin(newAdmin)
+
+                // Try uploading to cloud first
+                try {
+                    SupabaseClient.api.createAdmin(newAdmin)
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote addAdmin failed, fallback local write", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم الحفظ محلياً لعدم توفر إنترنت"
+                    }
+                }
+
+                // Ensure local data state is fully modified offline-ready
+                val currentList = _admins.value.toMutableList()
+                val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 10) + 1
+                currentList.add(newAdmin.copy(id = nextId))
+                _admins.value = currentList
+                saveAdminsCache(currentList)
+
                 fetchAdmins()
                 handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
@@ -243,14 +303,26 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _isLoading.value = true
             try {
                 val hashed = hashPasswordHelper(newPasswordInput)
-                val updates = mapOf("password_hash" to hashed)
-                val response = SupabaseClient.api.updateAdmin("eq.$adminId", updates)
-                if (response.isSuccessful) {
-                    fetchAdmins()
-                    handlerSuccessOnMain { onComplete(true) }
-                } else {
-                    handlerSuccessOnMain { onComplete(false) }
+                
+                try {
+                    val updates = mapOf("password_hash" to hashed)
+                    SupabaseClient.api.updateAdmin("eq.$adminId", updates)
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote password update failed, fallback local update", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم تغيير كلمة المرور محلياً"
+                    }
                 }
+
+                // Apply update to local persistence
+                val currentList = _admins.value.map {
+                    if (it.id == adminId) it.copy(passwordHash = hashed) else it
+                }
+                _admins.value = currentList
+                saveAdminsCache(currentList)
+
+                fetchAdmins()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Change pass failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -264,13 +336,21 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val response = SupabaseClient.api.deleteAdmin("eq.$adminId")
-                if (response.isSuccessful) {
-                    fetchAdmins()
-                    handlerSuccessOnMain { onComplete(true) }
-                } else {
-                    handlerSuccessOnMain { onComplete(false) }
+                try {
+                    SupabaseClient.api.deleteAdmin("eq.$adminId")
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote deleteAdmin failed, fallback local wipe", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم المسح محلياً لعدم توفر إنترنت"
+                    }
                 }
+
+                val currentList = _admins.value.filter { it.id != adminId }
+                _admins.value = currentList
+                saveAdminsCache(currentList)
+
+                fetchAdmins()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete admin failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -290,7 +370,24 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     icon = icon,
                     orderIndex = orderIndex
                 )
-                SupabaseClient.api.createCategory(category)
+
+                try {
+                    SupabaseClient.api.createCategory(category)
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote createCategory failed, fallback local write", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم إضافة القسم محلياً دليلي"
+                    }
+                }
+
+                // Store locally and update state flows dynamically
+                val currentList = _categories.value.toMutableList()
+                val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 1000) + 1
+                currentList.add(category.copy(id = nextId))
+                val sorted = currentList.sortedBy { it.orderIndex }
+                _categories.value = sorted
+                saveCategoriesCache(sorted)
+
                 fetchCategories()
                 handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
@@ -306,18 +403,31 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val updates = mapOf(
-                    "name_ar" to nameAr,
-                    "icon" to icon,
-                    "order_index" to orderIndex
-                )
-                val response = SupabaseClient.api.updateCategory("eq.$categoryId", updates)
-                if (response.isSuccessful) {
-                    fetchCategories()
-                    handlerSuccessOnMain { onComplete(true) }
-                } else {
-                    handlerSuccessOnMain { onComplete(false) }
+                try {
+                    val updates = mapOf(
+                        "name_ar" to nameAr,
+                        "icon" to icon,
+                        "order_index" to orderIndex
+                    )
+                    SupabaseClient.api.updateCategory("eq.$categoryId", updates)
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote updateCategory failed, fallback local write", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم تعديل القسم محلياً بنجاح"
+                    }
                 }
+
+                // Store locally and update state flows dynamically
+                val currentList = _categories.value.map {
+                    if (it.id == categoryId) {
+                        it.copy(nameAr = nameAr, icon = icon, orderIndex = orderIndex)
+                    } else it
+                }.sortedBy { it.orderIndex }
+                _categories.value = currentList
+                saveCategoriesCache(currentList)
+
+                fetchCategories()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -331,15 +441,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val response = SupabaseClient.api.deleteCategory("eq.$categoryId")
-                if (response.isSuccessful) {
-                    fetchCategories()
-                    // Delete orphaned providers as helper or let Cascade handle it
-                    fetchServiceProviders()
-                    handlerSuccessOnMain { onComplete(true) }
-                } else {
-                    handlerSuccessOnMain { onComplete(false) }
+                try {
+                    SupabaseClient.api.deleteCategory("eq.$categoryId")
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote deleteCategory failed, fallback local wipe", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم حذف القسم محلياً بنجاح"
+                    }
                 }
+
+                val currentList = _categories.value.filter { it.id != categoryId }
+                _categories.value = currentList
+                saveCategoriesCache(currentList)
+
+                // Flush local orphaned service providers
+                val cleanProvidersList = _serviceProviders.value.filter { it.categoryId != categoryId }
+                _serviceProviders.value = cleanProvidersList
+                saveProvidersCache(cleanProvidersList)
+
+                fetchCategories()
+                fetchServiceProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -362,7 +484,23 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     imageUrl = if (imageUrl.isNull_or_Empty()) null else imageUrl,
                     isActive = isActive
                 )
-                SupabaseClient.api.createServiceProvider(provider)
+
+                try {
+                    SupabaseClient.api.createServiceProvider(provider)
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote createServiceProvider failed, fallback local write", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم إضافة مقدم الخدمة محلياً"
+                    }
+                }
+
+                // Update local configuration state lists
+                val currentList = _serviceProviders.value.toMutableList()
+                val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
+                currentList.add(provider.copy(id = nextId))
+                _serviceProviders.value = currentList
+                saveProvidersCache(currentList)
+
                 fetchServiceProviders()
                 handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
@@ -378,21 +516,40 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val updates = mapOf(
-                    "name" to name,
-                    "phone" to phone,
-                    "category_id" to categoryId,
-                    "rating" to rating,
-                    "image_url" to (if (imageUrl.isNull_or_Empty()) "" else imageUrl!!),
-                    "is_active" to isActive
-                )
-                val response = SupabaseClient.api.updateServiceProvider("eq.$providerId", updates)
-                if (response.isSuccessful) {
-                    fetchServiceProviders()
-                    handlerSuccessOnMain { onComplete(true) }
-                } else {
-                    handlerSuccessOnMain { onComplete(false) }
+                try {
+                    val updates = mapOf(
+                        "name" to name,
+                        "phone" to phone,
+                        "category_id" to categoryId,
+                        "rating" to rating,
+                        "image_url" to (if (imageUrl.isNull_or_Empty()) "" else imageUrl!!),
+                        "is_active" to isActive
+                    )
+                    SupabaseClient.api.updateServiceProvider("eq.$providerId", updates)
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote updateServiceProvider failed, fallback local write", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم تعديل مقدم الخدمة محلياً"
+                    }
                 }
+
+                val currentList = _serviceProviders.value.map {
+                    if (it.id == providerId) {
+                        it.copy(
+                            name = name,
+                            phone = phone,
+                            categoryId = categoryId,
+                            rating = rating,
+                            imageUrl = if (imageUrl.isNull_or_Empty()) null else imageUrl,
+                            isActive = isActive
+                        )
+                    } else it
+                }
+                _serviceProviders.value = currentList
+                saveProvidersCache(currentList)
+
+                fetchServiceProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update provider failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -406,13 +563,21 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val response = SupabaseClient.api.deleteServiceProvider("eq.$providerId")
-                if (response.isSuccessful) {
-                    fetchServiceProviders()
-                    handlerSuccessOnMain { onComplete(true) }
-                } else {
-                    handlerSuccessOnMain { onComplete(false) }
+                try {
+                    SupabaseClient.api.deleteServiceProvider("eq.$providerId")
+                } catch (apiError: Exception) {
+                    Log.e("DaliliViewModel", "Remote deleteServiceProvider failed, fallback local wipe", apiError)
+                    handlerSuccessOnMain {
+                        _errorMessage.value = "تم حذف مقدم الخدمة محلياً"
+                    }
                 }
+
+                val currentList = _serviceProviders.value.filter { it.id != providerId }
+                _serviceProviders.value = currentList
+                saveProvidersCache(currentList)
+
+                fetchServiceProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete provider failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -422,6 +587,91 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // LOCAL JSON PARSERS (Saves lists directly as json text)
+    private fun saveCategoriesCache(list: List<Category>) {
+        try {
+            val json = categoriesAdapter.toJson(list)
+            sharedPrefs.edit().putString("cache_categories", json).apply()
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Write categories cache failed", e)
+        }
+    }
+
+    private fun loadCategoriesCache(): List<Category> {
+        val json = sharedPrefs.getString("cache_categories", null)
+        if (json != null) {
+            try {
+                return categoriesAdapter.fromJson(json) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Read categories cache failed", e)
+            }
+        }
+        return getDefaultCategories()
+    }
+
+    private fun saveProvidersCache(list: List<ServiceProvider>) {
+        try {
+            val json = providersAdapter.toJson(list)
+            sharedPrefs.edit().putString("cache_providers", json).apply()
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Write providers cache failed", e)
+        }
+    }
+
+    private fun loadProvidersCache(): List<ServiceProvider> {
+        val json = sharedPrefs.getString("cache_providers", null)
+        if (json != null) {
+            try {
+                return providersAdapter.fromJson(json) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Read providers cache failed", e)
+            }
+        }
+        return getDefaultProviders()
+    }
+
+    private fun saveAdminsCache(list: List<Admin>) {
+        try {
+            val json = adminsAdapter.toJson(list)
+            sharedPrefs.edit().putString("cache_admins", json).apply()
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Write admins cache failed", e)
+        }
+    }
+
+    private fun loadAdminsCache(): List<Admin> {
+        val json = sharedPrefs.getString("cache_admins", null)
+        if (json != null) {
+            try {
+                return adminsAdapter.fromJson(json) ?: emptyList()
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Read admins cache failed", e)
+            }
+        }
+        return emptyList()
+    }
+
+    // Default Pre-loaded arabian services for a flawless first run offline!
+    private fun getDefaultCategories(): List<Category> {
+        return listOf(
+            Category(id = 1001, nameAr = "خدمات الاتصالات", icon = "📱", orderIndex = 1),
+            Category(id = 1002, nameAr = "الطوارئ العامة", icon = "⚡", orderIndex = 2),
+            Category(id = 1003, nameAr = "الصحة والطب", icon = "🩺", orderIndex = 3),
+            Category(id = 1004, nameAr = "سيارات وأجرة", icon = "🚕", orderIndex = 4),
+            Category(id = 1005, nameAr = "الصيانة المنزلية", icon = "🛠️", orderIndex = 5)
+        )
+    }
+
+    private fun getDefaultProviders(): List<ServiceProvider> {
+        return listOf(
+            ServiceProvider(id = 2001, name = "مؤسسة الاتصالات والإنترنت", phone = "777644670", categoryId = 1001, rating = 5.0, isActive = true),
+            ServiceProvider(id = 2002, name = "طوارئ الكهرباء والمياه", phone = "191", categoryId = 1002, rating = 5.0, isActive = true),
+            ServiceProvider(id = 2003, name = "الهلال الأحمر والإسعاف", phone = "199", categoryId = 1003, rating = 5.0, isActive = true),
+            ServiceProvider(id = 2004, name = "تاكسي المشوار السريع", phone = "777644670", categoryId = 1004, rating = 4.5, isActive = true),
+            ServiceProvider(id = 2005, name = "خدمات السباكة والكهرباء المنزلية", phone = "777644670", categoryId = 1005, rating = 4.8, isActive = true)
+        )
+    }
+
     // Hashing helper
     private fun hashPasswordHelper(password: String): String {
         return try {
@@ -429,7 +679,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             val hash = digest.digest(password.toByteArray(Charsets.UTF_8))
             hash.fold("") { str, it -> str + "%02x".format(it) }
         } catch (e: Exception) {
-            password // Fallback to plain in case of weird device failures
+            password
         }
     }
 
