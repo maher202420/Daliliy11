@@ -77,64 +77,6 @@ class MainActivity : ComponentActivity() {
 fun MainContent(viewModel: DaliliViewModel) {
     val context = LocalContext.current
     
-    // Anti-Cloning & Security integrity verification
-    val isGenuine = remember { com.example.security.SecurityGuard.isAppGenuine(context) }
-
-    if (!isGenuine) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF121212))
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-                shape = RoundedCornerShape(20.dp),
-                elevation = CardDefaults.cardElevation(8.dp),
-                modifier = Modifier.fillMaxWidth().wrapContentHeight()
-            ) {
-                Column(
-                    modifier = Modifier.padding(28.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = "تحذير الأمان",
-                        tint = Color(0xFFD32F2F),
-                        modifier = Modifier.size(72.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        "تنبيه أمني هام",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "تم الكشف عن نسخة معدلة أو مستنسخة من هذا التطبيق.\n\nحفاظاً على سلامتك وأمن بيانات ومقدمي الخدمات والاتصالات، يُرجى دائماً استخدام النسخة الأصلية والرسمية المعتمدة من تطبيق دليلي - Dalili لتفادي أي ثغرات أو تعديلات خبيثة.",
-                        color = Color.LightGray,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 22.sp
-                    )
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        "رمز الحماية النشط: INVALID_SIGN_OR_PKG",
-                        color = Color.Gray,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Light,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-        return
-    }
-
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
     
     val categories by viewModel.categories.collectAsState()
