@@ -115,7 +115,7 @@ fun MainContent(viewModel: DaliliViewModel) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
-            PromoFooterSection()
+            PromoFooterSection(viewModel)
         }
     ) { innerPadding ->
         Surface(
@@ -229,23 +229,28 @@ fun MainContent(viewModel: DaliliViewModel) {
 // 【1. CONFIG - PROMO FOOTER】
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @Composable
-fun PromoFooterSection() {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(vertical = 8.dp)
-            .navigationBarsPadding(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "MAW 777644670",
-            color = Color.LightGray,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.testTag("promo_footer")
-        )
+fun PromoFooterSection(viewModel: DaliliViewModel) {
+    val footerText by viewModel.footerText.collectAsState()
+    val showFooter by viewModel.showFooter.collectAsState()
+
+    if (showFooter && footerText.trim().isNotEmpty()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(vertical = 4.dp)
+                .navigationBarsPadding(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = footerText,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                fontSize = 8.sp, // 50% smaller than average 16.sp
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("promo_footer")
+            )
+        }
     }
 }
 
@@ -268,6 +273,15 @@ fun HomeScreen(
     val customAppNameVal by viewModel.customAppName.collectAsState()
     val customAppLogoVal by viewModel.customAppLogo.collectAsState()
     val isAr by viewModel.isArabic.collectAsState()
+    val currentThemeChoice by viewModel.currentTheme.collectAsState()
+
+    LaunchedEffect(Unit) {
+        try {
+            viewModel.incrementUserLaunches()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "User launch count increment failed", e)
+        }
+    }
 
     var backdoorClickCount by remember { mutableStateOf(0) }
     var lastBackdoorClickTime by remember { mutableStateOf(0L) }
@@ -276,6 +290,7 @@ fun HomeScreen(
     var backdoorErrorHint by remember { mutableStateOf<String?>(null) }
 
     var showRegistrationDialog by remember { mutableStateOf(false) }
+    var showAboutAppDialog by remember { mutableStateOf(false) }
     var regName by remember { mutableStateOf("") }
     var regPhone by remember { mutableStateOf("") }
     var regCategoryIn by remember { mutableStateOf<Category?>(null) }
@@ -283,9 +298,24 @@ fun HomeScreen(
     var regCategoryDropdownExpanded by remember { mutableStateOf(false) }
     var regErrorHint by remember { mutableStateOf<String?>(null) }
 
-    var assistantQuestion by remember { mutableStateOf("") }
-    val assistantHistory by viewModel.chatHistory.collectAsState()
-    val isAssistantLoading by viewModel.isAssistantLoading.collectAsState()
+    var regUploadStatusMessage by remember { mutableStateOf("") }
+    var uploadedRegImageUrlForDialog by remember { mutableStateOf<String?>(null) }
+
+    val regGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            regUploadStatusMessage = "جاري رفع الصورة..."
+            viewModel.uploadImageToFirebaseStorage(it, "pending_providers") { downloadUrl ->
+                if (downloadUrl != null) {
+                    uploadedRegImageUrlForDialog = downloadUrl
+                    regUploadStatusMessage = "تم رفع الصورة بنجاح!"
+                } else {
+                    regUploadStatusMessage = "خطأ في رفع صورة مقدم الخدمة"
+                }
+            }
+        }
+    }
 
     val context = LocalContext.current
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
@@ -402,7 +432,11 @@ fun HomeScreen(
     // Professional Registration Dialog
     if (showRegistrationDialog) {
         AlertDialog(
-            onDismissRequest = { showRegistrationDialog = false },
+            onDismissRequest = { 
+                showRegistrationDialog = false 
+                regUploadStatusMessage = ""
+                uploadedRegImageUrlForDialog = null
+            },
             title = {
                 Text(tr("تسجيل أصحاب المهن الجدد 👤", "Service Provider Registration 👤"), fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Right)
             },
@@ -470,6 +504,32 @@ fun HomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Optional Avatar Upload for registering Service Provider
+                    Button(
+                        onClick = { regGalleryLauncher.launch("image/*") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Text(
+                            text = if (uploadedRegImageUrlForDialog != null) "تم اختيار واعتصار الصورة بنجاح ✅" else "إضافة صورة شخصية اختيارية (من المعرض 🖼️)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    if (regUploadStatusMessage.isNotEmpty()) {
+                        Text(
+                            text = regUploadStatusMessage,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp).fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
                     regErrorHint?.let {
                         Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp).fillMaxWidth(), textAlign = TextAlign.Right)
                     }
@@ -485,7 +545,8 @@ fun HomeScreen(
                         name = regName.trim(),
                         phone = regPhone.trim(),
                         categoryId = regCategoryIn!!.id ?: 1001,
-                        region = regRegion.trim()
+                        region = regRegion.trim(),
+                        imageUrl = uploadedRegImageUrlForDialog
                     ) { success ->
                         if (success) {
                             showRegistrationDialog = false
@@ -494,6 +555,8 @@ fun HomeScreen(
                             regCategoryIn = null
                             regRegion = ""
                             regErrorHint = null
+                            regUploadStatusMessage = ""
+                            uploadedRegImageUrlForDialog = null
                             Toast.makeText(context, tr("تم تسجيل طلبك بنجاح! سينظر المشرف في تفعيله قريباً.", "Application submitted successfully!"), Toast.LENGTH_LONG).show()
                         } else {
                             regErrorHint = tr("خطأ بالارتباط الخادمي، حاول ثانية.", "Server link failed.")
@@ -504,8 +567,154 @@ fun HomeScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRegistrationDialog = false }) {
+                TextButton(onClick = { 
+                    showRegistrationDialog = false 
+                    regUploadStatusMessage = ""
+                    uploadedRegImageUrlForDialog = null
+                    regName = ""
+                    regPhone = ""
+                    regCategoryIn = null
+                    regRegion = ""
+                    regErrorHint = null
+                }) {
                     Text(tr("إلغاء", "Cancel"))
+                }
+            }
+        )
+    }
+
+    // About App Dialog Portal
+    if (showAboutAppDialog) {
+        val appName by viewModel.customAppName.collectAsState()
+        val appLogo by viewModel.customAppLogo.collectAsState()
+        val supportPhone by viewModel.supportPhone.collectAsState()
+        val supportEmail by viewModel.supportEmail.collectAsState()
+        val supportWhatsapp by viewModel.supportWhatsapp.collectAsState()
+
+        AlertDialog(
+            onDismissRequest = { showAboutAppDialog = false },
+            title = {
+                Text(
+                    text = tr("حول التطبيق والاتصال المباشر ℹ️", "About Application & Support ℹ️"),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Right
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    // App logo branding
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(appLogo, fontSize = 42.sp)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(appName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "دليلك المهني المعتمد والأسرع في اليمن", 
+                                fontSize = 11.sp, 
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "للتواصل والدعم الفني والشكاوى 📞:", 
+                        fontSize = 12.sp, 
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                        textAlign = TextAlign.Right
+                    )
+
+                    // Telephony Support Contact Button
+                    Button(
+                        onClick = {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:$supportPhone"))
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "تعذر تشغيل تطبيق الاتصال", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text(supportPhone, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 6.dp))
+                            Text("رقم المساعدة والاتصال الأساسي :", fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("📞")
+                        }
+                    }
+
+                    // Direct WhatsApp Support Chat
+                    Button(
+                        onClick = {
+                            val intent = android.content.Intent(
+                                android.content.Intent.ACTION_VIEW, 
+                                android.net.Uri.parse("https://wa.me/$supportWhatsapp")
+                            )
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "تعذر تشغيل تطبيق واتساب", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text(supportWhatsapp, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 6.dp))
+                            Text("دردشة الواتساب الرسمية المباشرة :", fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("💬")
+                        }
+                    }
+
+                    // Email Support Contact Message
+                    Button(
+                        onClick = {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+                                data = android.net.Uri.parse("mailto:$supportEmail")
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, "تطبيق دليلي - استفسار / دعم")
+                            }
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "تعذر تشغيل تطبيق البريد", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Text(supportEmail, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 6.dp))
+                            Text("البريد الإلكتروني المعتمد للدعم :", fontSize = 10.sp)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("✉️")
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAboutAppDialog = false }) {
+                    Text("إغلاق", fontWeight = FontWeight.Bold)
                 }
             }
         )
@@ -547,7 +756,7 @@ fun HomeScreen(
                 IconButton(onClick = {
                     viewModel.toggleDarkMode()
                 }) {
-                    Text("🌙", fontSize = 21.sp)
+                    Text(if (currentThemeChoice == "dark") "☀️" else "🌙", fontSize = 21.sp)
                 }
 
                 // Icon 4: ⚙️ Admin Key Entry
@@ -560,6 +769,13 @@ fun HomeScreen(
                     showRegistrationDialog = true
                 }) {
                     Text("👤", fontSize = 21.sp)
+                }
+
+                // Icon 5.5: ℹ️ About App Dialog Portal
+                IconButton(onClick = {
+                    showAboutAppDialog = true
+                }) {
+                    Text("ℹ️", fontSize = 21.sp)
                 }
 
                 // Icon 6: 🏠 Backdoor Trigger
@@ -616,35 +832,7 @@ fun HomeScreen(
             modifier = Modifier.padding(horizontal = 8.dp)
         )
 
-        // Connection status pill
-        Row(
-            modifier = Modifier
-                .padding(vertical = 10.dp)
-                .clickable { showDiagnosticsDialog = true }
-                .background(
-                    color = if (isOnline) Color(0xFF4CAF50).copy(alpha = 0.15f) else Color(0xFFFF9800).copy(alpha = 0.15f),
-                    shape = RoundedCornerShape(100.dp)
-                )
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        color = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF9800),
-                        shape = CircleShape
-                    )
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = if (isOnline) tr("متصل بـ Firebase Firestore 🟢", "Connected to Firebase Firestore 🟢") else tr("الوضع المحلي الهجين 🟠 (اضغط للفحص)", "Offline Hybrid 🟠 (Click to Test)"),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isOnline) Color(0xFF4CAF50) else Color(0xFFFF9800)
-            )
-        }
+        Spacer(modifier = Modifier.height(10.dp))
 
         // Search text field
         TextField(
@@ -706,7 +894,7 @@ fun HomeScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(1.2f)
+                .weight(1f)
         ) {
             if (filteredCategories.isEmpty()) {
                 Box(
@@ -739,168 +927,6 @@ fun HomeScreen(
                     items(filteredCategories, key = { it.id ?: 0 }) { item ->
                         CategoryCardItem(category = item, onClick = { onCategoryClick(item) })
                     }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // SMART CHAT ASSISTANT SECTION (Persistent bottom box)
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f)
-            ),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(0.9f)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(10.dp)
-            ) {
-                // Header of assistant chat block
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { viewModel.clearChatHistory() },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = "مسح المحادثة", tint = Color.Gray, modifier = Modifier.size(18.dp))
-                    }
-                    Text(
-                        text = tr("الرد والبحث الفوري المساعد الذكي 🤖", "AI Intelligent Services Assistant 🤖"),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Right
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = Color.LightGray.copy(alpha = 0.25f))
-
-                // Scrollable Chat Message List Bubble Window
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    reverseLayout = true, // keeps bottom message visible
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    val reversedHistory = assistantHistory.reversed()
-                    if (reversedHistory.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = tr("أهلاً بك! يمكنك سؤالي عن أي خدمة (صيانة، طبيب، كهربائي...) وسأجيبك فوراً بالاعتماد على ذكاء دليلي والإنترنت.", "Welcome! Write any service or category type you're looking for, and I will find it instantly!"),
-                                    fontSize = 11.sp,
-                                    color = Color.Gray,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 14.dp)
-                                )
-                            }
-                        }
-                    } else {
-                        items(reversedHistory) { message ->
-                            val isUser = message.second
-                            val align = if (isUser) Alignment.End else Alignment.Start
-                            val bubbleColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-                            val textColor = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                            
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = align
-                            ) {
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = bubbleColor),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Text(
-                                        text = message.first,
-                                        fontSize = 12.sp,
-                                        color = textColor,
-                                        modifier = Modifier.padding(8.dp),
-                                        textAlign = if (isUser) TextAlign.Right else TextAlign.Left
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (isAssistantLoading) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(tr("جاري المعالجة الفورية وصياغة الرد...", "AI Thinking..."), fontSize = 10.sp, color = Color.Gray)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Chat Input Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Send action icon triggers assist asking
-                    IconButton(
-                        onClick = {
-                            if (assistantQuestion.trim().isNotEmpty()) {
-                                viewModel.askAssistant(assistantQuestion.trim())
-                                assistantQuestion = ""
-                            }
-                        },
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.primary, CircleShape)
-                            .size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "إرسال",
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    OutlinedTextField(
-                        value = assistantQuestion,
-                        onValueChange = { assistantQuestion = it },
-                        textStyle = TextStyle(
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Right
-                        ),
-                        placeholder = { 
-                            Text(
-                                tr("ابحث أو اكتب سؤالك للمساعد...", "Ask me anything..."), 
-                                fontSize = 11.sp, 
-                                modifier = Modifier.fillMaxWidth(),
-                                textAlign = TextAlign.End
-                            ) 
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = Color.LightGray.copy(alpha = 0.5f)
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
-                    )
                 }
             }
         }
@@ -991,12 +1017,21 @@ fun CategoryProvidersScreen(
     var qInput by remember { mutableStateOf("") }
     var activeProviderReviewsTarget by remember { mutableStateOf<ServiceProvider?>(null) }
     
-    // Filter byCategory ID & Filter query name
-    val filteredList = remember(allProviders, category.id, qInput) {
+    // Filtering states
+    var showFilterDialog by remember { mutableStateOf(false) }
+    var ratingFilter by remember { mutableStateOf(0.0) } // 0.0 means all, else 1.0 - 5.0
+    var distanceFilter by remember { mutableStateOf("all") } // "all", "near", "medium", "far"
+    var priceFilter by remember { mutableStateOf("all") } // "all", "low", "medium", "high"
+
+    // Filter by Category ID & Filter query name & Advanced parameters
+    val filteredList = remember(allProviders, category.id, qInput, ratingFilter, distanceFilter, priceFilter) {
         allProviders.filter { 
             it.categoryId == category.id && 
             it.isActive &&
-            (qInput.isEmpty() || it.name.contains(qInput, ignoreCase = true) || it.phone.contains(qInput, ignoreCase = true))
+            (qInput.isEmpty() || it.name.contains(qInput, ignoreCase = true) || it.phone.contains(qInput, ignoreCase = true)) &&
+            (ratingFilter == 0.0 || it.rating >= ratingFilter) &&
+            (distanceFilter == "all" || it.distanceCategory == distanceFilter) &&
+            (priceFilter == "all" || it.priceCategory == priceFilter)
         }
     }
 
@@ -1077,6 +1112,175 @@ fun CategoryProvidersScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                                 textAlign = TextAlign.Center
                             )
+                        }
+                    }
+
+                    // Google Maps Location Card
+                    if (provider.lat != null && provider.lng != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.End
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocationOn,
+                                        contentDescription = "موقع",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "موقع مقدم الخدمة على الخريطة (Google Maps)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                // Stylized canvas showing simulated Google Maps grid with roads and Pin!
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(130.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFE5F5E0)) // map light green background
+                                        .clickable {
+                                            val gmmIntentUri = Uri.parse("google.navigation:q=${provider.lat},${provider.lng}")
+                                            val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                                            mapIntent.setPackage("com.google.android.apps.maps")
+                                            try {
+                                                context.startActivity(mapIntent)
+                                            } catch (e: Exception) {
+                                                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=${provider.lat},${provider.lng}"))
+                                                context.startActivity(webIntent)
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    // Custom map roads and markers drawn on a Canvas
+                                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                                        val w = size.width
+                                        val h = size.height
+                                        val pathColor = Color(0xFFFFFFFF)
+                                        val riverColor = Color(0xFF90CAF9)
+                                        
+                                        // Draw a river / blue diagonal belt
+                                        drawLine(
+                                            color = riverColor,
+                                            start = androidx.compose.ui.geometry.Offset(0f, h * 0.2f),
+                                            end = androidx.compose.ui.geometry.Offset(w, h * 0.5f),
+                                            strokeWidth = 25f
+                                        )
+                                        
+                                        // Draw roads
+                                        drawLine(
+                                            color = pathColor,
+                                            start = androidx.compose.ui.geometry.Offset(w * 0.2f, 0f),
+                                            end = androidx.compose.ui.geometry.Offset(w * 0.2f, h),
+                                            strokeWidth = 14f
+                                        )
+                                        drawLine(
+                                            color = pathColor,
+                                            start = androidx.compose.ui.geometry.Offset(w * 0.8f, 0f),
+                                            end = androidx.compose.ui.geometry.Offset(w * 0.8f, h),
+                                            strokeWidth = 14f
+                                        )
+                                        drawLine(
+                                            color = pathColor,
+                                            start = androidx.compose.ui.geometry.Offset(0f, h * 0.4f),
+                                            end = androidx.compose.ui.geometry.Offset(w, h * 0.4f),
+                                            strokeWidth = 14f
+                                        )
+                                        drawLine(
+                                            color = pathColor,
+                                            start = androidx.compose.ui.geometry.Offset(0f, h * 0.8f),
+                                            end = androidx.compose.ui.geometry.Offset(w, h * 0.8f),
+                                            strokeWidth = 14f
+                                        )
+                                    }
+                                    
+                                    // Center marker showing Pin and tooltip
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color.White, RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = provider.name,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.Black
+                                            )
+                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.Place,
+                                            contentDescription = "موقع",
+                                            tint = Color.Red,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                    
+                                    // Zoom controls indicator
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomStart)
+                                            .padding(6.dp)
+                                    ) {
+                                        Text(
+                                            "إحداثيات: ${provider.lat}, ${provider.lng}",
+                                            fontSize = 8.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color.DarkGray,
+                                            modifier = Modifier
+                                                .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                
+                                Spacer(modifier = Modifier.height(10.dp))
+                                
+                                // Directions button
+                                Button(
+                                    onClick = {
+                                        val gmmIntentUri = Uri.parse("google.navigation:q=${provider.lat},${provider.lng}")
+                                        val mapIntent = Intent(Intent.ACTION_VIEW, gmmIntentUri)
+                                        mapIntent.setPackage("com.google.android.apps.maps")
+                                        try {
+                                            context.startActivity(mapIntent)
+                                        } catch (e: Exception) {
+                                            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=${provider.lat},${provider.lng}"))
+                                            context.startActivity(webIntent)
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LocationOn,
+                                        contentDescription = "اتجاهات"
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("الاتجاهات (Open in Google Maps) 🗺️", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                }
+                            }
                         }
                     }
 
@@ -1332,8 +1536,168 @@ fun CategoryProvidersScreen(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp)
+                .padding(bottom = 12.dp)
         )
+
+        // Filter options row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = { showFilterDialog = true },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (ratingFilter > 0.0 || distanceFilter != "all" || priceFilter != "all") 
+                        MaterialTheme.colorScheme.primary 
+                    else 
+                        MaterialTheme.colorScheme.secondary
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.List,
+                    contentDescription = "فلترة",
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("فلترة متقدمة (سعر، تقييم، مسافة) 🔍", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            
+            if (ratingFilter > 0.0 || distanceFilter != "all" || priceFilter != "all") {
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(
+                    onClick = {
+                        ratingFilter = 0.0
+                        distanceFilter = "all"
+                        priceFilter = "all"
+                    }
+                ) {
+                    Text("إلغاء الكل 🚫", color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // Active Filter Chips display
+        if (ratingFilter > 0.0 || distanceFilter != "all" || priceFilter != "all") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (priceFilter != "all") {
+                    val prLabel = when(priceFilter) {
+                        "low" -> "💰 منخفض"
+                        "medium" -> "💰 متوسط"
+                        else -> "💰 مرتفع"
+                    }
+                    SuggestionChip(
+                        onClick = { priceFilter = "all" },
+                        label = { Text(prLabel, fontSize = 10.sp) },
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    )
+                }
+                if (distanceFilter != "all") {
+                    val dstLabel = when(distanceFilter) {
+                        "near" -> "📍 قريب"
+                        "medium" -> "📍 متوسط"
+                        else -> "📍 بعيد"
+                    }
+                    SuggestionChip(
+                        onClick = { distanceFilter = "all" },
+                        label = { Text(dstLabel, fontSize = 10.sp) },
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    )
+                }
+                if (ratingFilter > 0.0) {
+                    SuggestionChip(
+                        onClick = { ratingFilter = 0.0 },
+                        label = { Text("⭐ $ratingFilter وأعلى", fontSize = 10.sp) },
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    )
+                }
+                Text("الفلاتر النشطة:", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+
+        // Advanced Filter Dialog
+        if (showFilterDialog) {
+            AlertDialog(
+                onDismissRequest = { showFilterDialog = false },
+                title = { 
+                    Text("خيار الفرز والدقة المتقدم ⚡", fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) 
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        // Rating Selector
+                        Text("حسب التقييم المطلوب 🌟", fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+                        Row {
+                            listOf(0.0 to "الكل", 3.0 to "3+", 4.0 to "4+", 4.5 to "4.5+").forEach { (stars, lbl) ->
+                                InputChip(
+                                    selected = ratingFilter == stars,
+                                    onClick = { ratingFilter = stars },
+                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        // Distance Selector
+                        Text("مسافة مقدم الخدمة 🚗", fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+                        Row {
+                            listOf("all" to "الكل", "near" to "قريب", "medium" to "متوسط", "far" to "بعيد").forEach { (valKey, lbl) ->
+                                InputChip(
+                                    selected = distanceFilter == valKey,
+                                    onClick = { distanceFilter = valKey },
+                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        // Price Selector
+                        Text("مستوى التكلفة / السعر 💰", fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
+                        Row {
+                            listOf("all" to "الكل", "low" to "منخفض", "medium" to "متوسط", "high" to "مرتفع").forEach { (valKey, lbl) ->
+                                InputChip(
+                                    selected = priceFilter == valKey,
+                                    onClick = { priceFilter = valKey },
+                                    label = { Text(lbl, fontSize = 11.sp) },
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { showFilterDialog = false }) {
+                        Text("تطبيق التصفية 🎯", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { 
+                        ratingFilter = 0.0
+                        distanceFilter = "all"
+                        priceFilter = "all"
+                        showFilterDialog = false 
+                    }) {
+                        Text("إعادة ضبط", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            )
+        }
 
         // Services list
         if (filteredList.isEmpty()) {
@@ -1371,7 +1735,8 @@ fun CategoryProvidersScreen(
                     ProviderCardRow(
                         provider = provider, 
                         context = context,
-                        onClick = { activeProviderReviewsTarget = provider }
+                        onClick = { activeProviderReviewsTarget = provider },
+                        onCallContact = { viewModel.incrementCallsCount() }
                     )
                 }
             }
@@ -1383,7 +1748,7 @@ fun CategoryProvidersScreen(
 // 【5. SERVICE PROVIDER ROW COMPOSABLE】
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 @Composable
-fun ProviderCardRow(provider: ServiceProvider, context: Context, onClick: () -> Unit) {
+fun ProviderCardRow(provider: ServiceProvider, context: Context, onClick: () -> Unit, onCallContact: () -> Unit) {
     Card(
         onClick = onClick,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1407,6 +1772,9 @@ fun ProviderCardRow(provider: ServiceProvider, context: Context, onClick: () -> 
                 // Call Phone Intent Button
                 Button(
                     onClick = {
+                        try {
+                            onCallContact()
+                        } catch (e: Exception) {}
                         val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${provider.phone}"))
                         context.startActivity(intent)
                     },
@@ -1430,6 +1798,9 @@ fun ProviderCardRow(provider: ServiceProvider, context: Context, onClick: () -> 
                 // WhatsApp API View Intent Button (Styled Vibrant Green #4CAF50)
                 Button(
                     onClick = {
+                        try {
+                            onCallContact()
+                        } catch (e: Exception) {}
                         val pureDigits = provider.phone.filter { it.isDigit() }
                         val linkUrl = "https://api.whatsapp.com/send?phone=$pureDigits"
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))
@@ -1650,6 +2021,7 @@ fun AdminDashboardScreen(
     viewModel: DaliliViewModel,
     onBackClick: () -> Unit
 ) {
+    val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(0) }
     // Tab list (super_admin has 5 tabs, standard admin has 3)
     val isSuperAdmin = currentUser.role == "super_admin" || currentUser.username == "admin"
@@ -1697,6 +2069,130 @@ fun AdminDashboardScreen(
                 .padding(bottom = 12.dp),
             textAlign = TextAlign.Center
         )
+
+        // Statistics Flow & Live Database Counters (Task: إحصائيات للمالك + تصدير للمالك)
+        val userLaunches by viewModel.userLaunches.collectAsState()
+        val callsCount by viewModel.callsCount.collectAsState()
+        val reviewsState by viewModel.reviews.collectAsState()
+        val pendingProvidersState by viewModel.pendingProviders.collectAsState()
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = "إحصائيات",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "إحصائيات استخدام المنصة وبوابة التصدير 📈",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("إجمالي نقرات الاتصال 📞", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, textAlign = TextAlign.Center)
+                            Text("$callsCount", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text("إجمالي زيارات المستخدمين 📶", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary, textAlign = TextAlign.Center)
+                            Text("$userLaunches", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Export Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val reviewsHtml = generateReviewsHtml(reviewsState, serviceProviders)
+                            exportHtmlToPdf(context, reviewsHtml, "reviews_report")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        modifier = Modifier.weight(1.0f),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "تصدير", modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("التقييمات PDF 📄", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            val requestsHtml = generatePendingRequestsHtml(pendingProvidersState, categories)
+                            exportHtmlToPdf(context, requestsHtml, "requests_report")
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        modifier = Modifier.weight(1.0f),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "تصدير", modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("طلبات التسجيل PDF 📑", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            exportProvidersToExcelCsv(context, serviceProviders, categories)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.weight(1.0f),
+                        shape = RoundedCornerShape(6.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "تصدير", modifier = Modifier.size(12.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("العملاء Excel 📊", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
 
         // Custom Navigation Tab Row
         TabRow(selectedTabIndex = selectedTab) {
@@ -1849,9 +2345,6 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
 
     var appNameInput by remember(savedAppName) { mutableStateOf(savedAppName) }
     var appLogoInput by remember(savedAppLogo) { mutableStateOf(savedAppLogo) }
-
-    var customUrl by remember { mutableStateOf(viewModel.getSupabaseUrl()) }
-    var customKey by remember { mutableStateOf(viewModel.getSupabaseKey()) }
 
     Column(
         modifier = Modifier
@@ -2012,97 +2505,7 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
             }
         }
 
-        // Supabase Cloud Configuration Card
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.End
-            ) {
-                Text(
-                    text = "رابط التوازن السحابي (Supabase) 🌐",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Right,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    text = "يرتبط التطبيق بقاعدتك السحابية مباشرة. يمكنك تعديل الرابط أو تبديل المشغل في أي وقت وسيربط التطبيق نفسه تلقائياً دون الحاجة إلى تحديث متجر التطبيقات!",
-                    fontSize = 11.sp,
-                    color = Color.Gray,
-                    textAlign = TextAlign.Right,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
 
-                OutlinedTextField(
-                    value = customUrl,
-                    onValueChange = { customUrl = it },
-                    label = { Text("Supabase URL (رابط المشروع السحابي)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Left)
-                )
-
-                OutlinedTextField(
-                    value = customKey,
-                    onValueChange = { customKey = it },
-                    label = { Text("Anon/Publishable Key (مفتاح المشروع المشترك)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Left)
-                )
-
-                Button(
-                    onClick = {
-                        if (customUrl.trim().isEmpty() || customKey.trim().isEmpty()) {
-                            Toast.makeText(context, "الرجاء كتابة الرابط ومفتاح الاتصال بشكل صحيح!", Toast.LENGTH_LONG).show()
-                        } else {
-                            viewModel.updateSupabaseConfig(customUrl.trim(), customKey.trim())
-                            viewModel.refreshAll()
-                            Toast.makeText(context, "تم تحديث إعدادات الاتصال بنجاح! يتم الآن إعادة الربط والمزامنة السحابية الفورية...", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "حفظ وإعادة مزامنة", tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("حفظ وإعادة الاتصال السحابي السريع", fontWeight = FontWeight.Bold, color = Color.White)
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Connection diagnostics checklist
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = if (isOnline) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Text(
-                            text = if (isOnline) 
-                                "حالة الربط: خادم سحابي نشط ومتزامن بنجاح عبر الإنترنت ✅" 
-                            else 
-                                "حالة الربط: خادم متوقف أو معطل، يعمل محلياً في وضع الحماية ❌",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isOnline) Color(0xFF2E7D32) else Color(0xFFE65100),
-                            textAlign = TextAlign.Right,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -2666,6 +3069,10 @@ fun ProvidersManagementSubscreen(
         var ratingIn by remember { mutableStateOf(provTarget.rating.toString()) }
         var imageUrlIn by remember { mutableStateOf(provTarget.imageUrl ?: "") }
         var isActiveIn by remember { mutableStateOf(provTarget.isActive) }
+        var latIn by remember { mutableStateOf(provTarget.lat?.toString() ?: "") }
+        var lngIn by remember { mutableStateOf(provTarget.lng?.toString() ?: "") }
+        var priceCategoryIn by remember { mutableStateOf(provTarget.priceCategory) }
+        var distanceCategoryIn by remember { mutableStateOf(provTarget.distanceCategory) }
         var errorHint by remember { mutableStateOf<String?>(null) }
         
         var dropdownExpanded by remember { mutableStateOf(false) }
@@ -2763,7 +3170,85 @@ fun ProvidersManagementSubscreen(
                             textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Left),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = lngIn,
+                                onValueChange = { lngIn = it },
+                                label = { Text("خط الطول Lng (اختياري)", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
+                                singleLine = true,
+                                textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Left),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = latIn,
+                                onValueChange = { latIn = it },
+                                label = { Text("خط العرض Lat (اختياري)", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
+                                singleLine = true,
+                                textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Left),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        
                         Spacer(modifier = Modifier.height(6.dp))
+                        
+                        Button(
+                            onClick = {
+                                latIn = (15.35 + (0.05 * Math.random())).toString().take(7)
+                                lngIn = (44.18 + (0.05 * Math.random())).toString().take(7)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("📍 توليد موقع اختياري في صنعاء للتجربة بسرعة", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        
+                        Spacer(modifier = Modifier.height(10.dp))
+                        
+                        // Price Category Selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row {
+                                listOf("low" to "منخفض", "medium" to "متوسط", "high" to "مرتفع").forEach { (valKey, nameLabel) ->
+                                    FilterChip(
+                                        selected = priceCategoryIn == valKey,
+                                        onClick = { priceCategoryIn = valKey },
+                                        label = { Text(nameLabel, fontSize = 11.sp) },
+                                        modifier = Modifier.padding(horizontal = 2.dp)
+                                    )
+                                }
+                            }
+                            Text("فئة السعر:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        // Distance Category Selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row {
+                                listOf("near" to "قريب", "medium" to "متوسط", "far" to "بعيد").forEach { (valKey, nameLabel) ->
+                                    FilterChip(
+                                        selected = distanceCategoryIn == valKey,
+                                        onClick = { distanceCategoryIn = valKey },
+                                        label = { Text(nameLabel, fontSize = 11.sp) },
+                                        modifier = Modifier.padding(horizontal = 2.dp)
+                                    )
+                                }
+                            }
+                            Text("فئة المسافة:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         // Gallery image button for provider
                         Button(
@@ -2814,6 +3299,8 @@ fun ProvidersManagementSubscreen(
                         return@Button
                     }
                     val currentRating = ratingIn.toDoubleOrNull() ?: 5.0
+                    val currentLat = latIn.toDoubleOrNull()
+                    val currentLng = lngIn.toDoubleOrNull()
 
                     if (isNewProvider) {
                         viewModel.addServiceProvider(
@@ -2822,7 +3309,11 @@ fun ProvidersManagementSubscreen(
                             categoryId = categoryIdIn,
                             rating = currentRating,
                             imageUrl = imageUrlIn.trim(),
-                            isActive = isActiveIn
+                            isActive = isActiveIn,
+                            lat = currentLat,
+                            lng = currentLng,
+                            priceCategory = priceCategoryIn,
+                            distanceCategory = distanceCategoryIn
                         ) { ok ->
                             if (ok) {
                                 showUpsertProviderDialogTarget = null
@@ -2840,7 +3331,11 @@ fun ProvidersManagementSubscreen(
                                 categoryId = categoryIdIn,
                                 rating = currentRating,
                                 imageUrl = imageUrlIn.trim(),
-                                isActive = isActiveIn
+                                isActive = isActiveIn,
+                                lat = currentLat,
+                                lng = currentLng,
+                                priceCategory = priceCategoryIn,
+                                distanceCategory = distanceCategoryIn
                             ) { ok ->
                                 if (ok) {
                                     showUpsertProviderDialogTarget = null
@@ -2860,4 +3355,189 @@ fun ProvidersManagementSubscreen(
             }
         )
     }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 【6. NATIVE lightweight DATA EXPORTERS】
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+fun exportProvidersToExcelCsv(context: Context, providers: List<ServiceProvider>, categories: List<Category>) {
+    try {
+        val catMap = categories.associate { it.id to it.nameAr }
+        val csvHeader = "ID,الاسم,الهاتف,القسم,التقييم,نشط؟,خط العرض,خط الطول,فئة السعر,فئة المسافة\n"
+        val csvRows = providers.map { p ->
+            val catName = p.categoryId.let { catMap[it] ?: "غير معروف" }
+            val isActiveText = if (p.isActive) "نعم" else "لا"
+            val latText = p.lat?.toString() ?: ""
+            val lngText = p.lng?.toString() ?: ""
+            val priceVal = when(p.priceCategory) {
+                "low" -> "منخفض"
+                "medium" -> "متوسط"
+                "high" -> "مرتفع"
+                else -> p.priceCategory
+            }
+            val distVal = when(p.distanceCategory) {
+                "near" -> "قريب"
+                "medium" -> "متوسط"
+                "far" -> "بعيد"
+                else -> p.distanceCategory
+            }
+            "${p.id ?: ""},\"${p.name}\",\"${p.phone}\",\"$catName\",${p.rating},\"$isActiveText\",$latText,$lngText,\"$priceVal\",\"$distVal\""
+        }.joinToString("\n")
+        
+        // Write UTF-8 BOM + CSV Data to support Arabic fully in Microsoft Excel
+        val csvContent = "\uFEFF" + csvHeader + csvRows
+        
+        val file = java.io.File(context.cacheDir, "providers_export.csv")
+        file.writeBytes(csvContent.toByteArray(Charsets.UTF_8))
+        
+        val fileUri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "com.yemenservices.app.fileprovider",
+            file
+        )
+        
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_SUBJECT, "تصدير بيانات مقدمي الخدمات")
+            putExtra(Intent.EXTRA_STREAM, fileUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "تصدير البيانات إلى الكمبيوتر"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "فشل تصدير البيانات: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun exportHtmlToPdf(context: Context, htmlContent: String, jobName: String) {
+    try {
+        // Run on main thread because WebView creation requires Looper
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        mainHandler.post {
+            try {
+                val webView = android.webkit.WebView(context)
+                webView.webViewClient = object : android.webkit.WebViewClient() {
+                    override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                        try {
+                            val printManager = context.getSystemService(Context.PRINT_SERVICE) as android.print.PrintManager
+                            val printAdapter = webView.createPrintDocumentAdapter(jobName)
+                            printManager.print(
+                                jobName,
+                                printAdapter,
+                                android.print.PrintAttributes.Builder().build()
+                            )
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "خطأ أثناء محاولة الطباعة: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                webView.loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
+            } catch (e: Exception) {
+                Toast.makeText(context, "فشل تهيئة الطباعة: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    } catch (e: Exception) {
+        Toast.makeText(context, "فشل معالجة الطباعة: ${e.message}", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun generateReviewsHtml(reviews: List<com.example.data.Review>, providers: List<ServiceProvider>): String {
+    val provMap = providers.associate { it.id to it.name }
+    val formatter = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+    val formattedDate = formatter.format(java.util.Date())
+    
+    val tableContent = reviews.map { r ->
+        val pName = provMap[r.providerId] ?: "مقدم خدمة #${r.providerId}"
+        val pRating = "⭐ ${r.rating} / 5.0"
+        "<tr><td>$pName</td><td>${r.userName}</td><td class='rating'>$pRating</td><td>${r.comment}</td><td>${r.createdAt ?: ""}</td></tr>"
+    }.joinToString("")
+    
+    return """
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+            <meta charset="UTF-8">
+            <title>تقرير تقييمات ومراجعات العملاء</title>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f9f9f9; text-align: right; }
+                h1 { color: #1e3a8a; text-align: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 20px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                th, td { padding: 12px 15px; border: 1px solid #ddd; text-align: right; }
+                th { background-color: #1e3a8a; color: white; font-weight: bold; }
+                tr:nth-child(even) { background-color: #f2f2f2; }
+                .rating { color: #f59e0b; font-weight: bold; }
+                .footer { text-align: center; font-size: 11px; color: #666; margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 15px; }
+            </style>
+        </head>
+        <body>
+            <h1>📁 تقرير تقييمات وآراء العملاء المصدرّة</h1>
+            <p>تاريخ استخراج التقرير: $formattedDate</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>مقدم الخدمة</th>
+                        <th>اسم العميل</th>
+                        <th>التقييم</th>
+                        <th>التعليق</th>
+                        <th>تاريخ الإضافة</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    $tableContent
+                </tbody>
+            </table>
+            <div class="footer">تطبيق دليل الخدمات اليمنية - تصدير تلقائي آمن للكمبيوتر 💻</div>
+        </body>
+        </html>
+    """.trimIndent()
+}
+
+fun generatePendingRequestsHtml(requests: List<PendingProvider>, categories: List<Category>): String {
+    val catMap = categories.associate { it.id to it.nameAr }
+    val formatter = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+    val formattedDate = formatter.format(java.util.Date())
+    
+    val tableContent = requests.map { req ->
+        val cName = catMap[req.categoryId] ?: "غير معروف"
+        "<tr><td>${req.name}</td><td>${req.phone}</td><td>$cName</td><td>${req.region}</td><td class='status'>${req.status}</td></tr>"
+    }.joinToString("")
+    
+    return """
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+        <head>
+            <meta charset="UTF-8">
+            <title>تقرير طلبات انضمام مقدمي الخدمات</title>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f9f9f9; text-align: right; }
+                h1 { color: #1e3a8a; text-align: center; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; margin-bottom: 20px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+                th, td { padding: 12px 15px; border: 1px solid #ddd; text-align: right; }
+                th { background-color: #1e3a8a; color: white; font-weight: bold; }
+                tr:nth-child(even) { background-color: #f2f2f2; }
+                .status { font-weight: bold; color: #2563eb; }
+                .footer { text-align: center; font-size: 11px; color: #666; margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 15px; }
+            </style>
+        </head>
+        <body>
+            <h1>📝 طلبات تسجيل مقدمي الخدمات الجدد</h1>
+            <p>تاريخ استخراج التقرير: $formattedDate</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>الاسم المقترح</th>
+                        <th>رقم الهاتف</th>
+                        <th>القسم المطلوب</th>
+                        <th>المنطقة المحددة</th>
+                        <th>الحالة الحالية</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    $tableContent
+                </tbody>
+            </table>
+            <div class="footer">تطبيق دليل الخدمات اليمنية - تصدير تقارير المدير العام 💼</div>
+        </body>
+        </html>
+    """.trimIndent()
 }

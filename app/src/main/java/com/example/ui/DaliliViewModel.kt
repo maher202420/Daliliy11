@@ -12,6 +12,7 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.example.utils.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,6 +67,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _isCloudConnected = MutableStateFlow(true)
     val isCloudConnected = _isCloudConnected.asStateFlow()
+
+    private val _supportPhone = MutableStateFlow("777644670")
+    val supportPhone = _supportPhone.asStateFlow()
+
+    private val _supportEmail = MutableStateFlow("support@dalili.com")
+    val supportEmail = _supportEmail.asStateFlow()
+
+    private val _supportWhatsapp = MutableStateFlow("777644670")
+    val supportWhatsapp = _supportWhatsapp.asStateFlow()
+
+    private val _footerText = MutableStateFlow("MAW 777644670")
+    val footerText = _footerText.asStateFlow()
+
+    private val _showFooter = MutableStateFlow(true)
+    val showFooter = _showFooter.asStateFlow()
+
+    private val _userLaunches = MutableStateFlow(0)
+    val userLaunches = _userLaunches.asStateFlow()
+
+    private val _callsCount = MutableStateFlow(0)
+    val callsCount = _callsCount.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
@@ -144,7 +166,23 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                             val rating = doc.getDouble("rating") ?: 5.0
                             val imageUrl = doc.getString("image_url")
                             val isActive = doc.getBoolean("is_active") ?: true
-                            ServiceProvider(id = id, name = name, phone = phone, categoryId = categoryId, rating = rating, imageUrl = imageUrl, isActive = isActive)
+                            val lat = doc.getDouble("lat")
+                            val lng = doc.getDouble("lng")
+                            val priceCategory = doc.getString("price_category") ?: "medium"
+                            val distanceCategory = doc.getString("distance_category") ?: "medium"
+                            ServiceProvider(
+                                id = id,
+                                name = name,
+                                phone = phone,
+                                categoryId = categoryId,
+                                rating = rating,
+                                imageUrl = imageUrl,
+                                isActive = isActive,
+                                lat = lat,
+                                lng = lng,
+                                priceCategory = priceCategory,
+                                distanceCategory = distanceCategory
+                            )
                         } catch (e: Exception) {
                             null
                         }
@@ -222,14 +260,51 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                             val phone = doc.getString("phone") ?: ""
                             val categoryId = doc.getLong("category_id")?.toInt() ?: 0
                             val region = doc.getString("region") ?: ""
+                            val imageUrl = doc.getString("image_url")
                             val status = doc.getString("status") ?: "pending"
                             val createdAt = doc.getString("created_at")
-                            PendingProvider(id = id, name = name, phone = phone, categoryId = categoryId, region = region, status = status, createdAt = createdAt)
+                            PendingProvider(id = id, name = name, phone = phone, categoryId = categoryId, region = region, imageUrl = imageUrl, status = status, createdAt = createdAt)
                         } catch (e: Exception) {
                             null
                         }
                     }
                     _pendingProviders.value = list
+                }
+            }
+
+        // 6. System Settings Listener
+        firestore.collection("settings").document("app_config")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    _supportPhone.value = snapshot.getString("support_phone") ?: "777644670"
+                    _supportEmail.value = snapshot.getString("support_email") ?: "support@dalili.com"
+                    _supportWhatsapp.value = snapshot.getString("support_whatsapp") ?: "777644670"
+                    _footerText.value = snapshot.getString("footer_text") ?: "MAW 777644670"
+                    _showFooter.value = snapshot.getBoolean("show_footer") ?: true
+                } else {
+                    val initData = mapOf(
+                        "support_phone" to "777644670",
+                        "support_email" to "support@dalili.com",
+                        "support_whatsapp" to "777644670",
+                        "footer_text" to "MAW 777644670",
+                        "show_footer" to true
+                    )
+                    firestore.collection("settings").document("app_config").set(initData)
+                }
+            }
+
+        // 7. App Stats Listener
+        firestore.collection("stats").document("app_usage")
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    _userLaunches.value = snapshot.getLong("user_launches")?.toInt() ?: 0
+                    _callsCount.value = snapshot.getLong("calls_count")?.toInt() ?: 0
+                } else {
+                    val initStats = mapOf(
+                        "user_launches" to 0,
+                        "calls_count" to 0
+                    )
+                    firestore.collection("stats").document("app_usage").set(initStats)
                 }
             }
     }
@@ -644,6 +719,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         rating: Double, 
         imageUrl: String, 
         isActive: Boolean, 
+        lat: Double? = null,
+        lng: Double? = null,
+        priceCategory: String = "medium",
+        distanceCategory: String = "medium",
         onComplete: (Boolean) -> Unit
     ) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -658,12 +737,25 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     rating = rating,
                     imageUrl = imageUrl,
                     isActive = isActive,
-                    createdAt = System.currentTimeMillis().toString()
+                    createdAt = System.currentTimeMillis().toString(),
+                    lat = lat,
+                    lng = lng,
+                    priceCategory = priceCategory,
+                    distanceCategory = distanceCategory
                 )
 
                 firestore.collection("service_providers").document(nextId.toString())
                     .set(provider)
                     .addOnSuccessListener {
+                        try {
+                            NotificationHelper.scheduleNotification(
+                                getApplication(),
+                                "تم إضافة خدمة جديدة! 🎉",
+                                "تم إضافة مقدم الخدمة: $name بنجاح!"
+                            )
+                        } catch (e: Exception) {
+                            Log.e("DaliliViewModel", "Notification scheduling failed", e)
+                        }
                         handlerSuccessOnMain { onComplete(true) }
                     }
                     .addOnFailureListener {
@@ -686,6 +778,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         rating: Double,
         imageUrl: String?,
         isActive: Boolean,
+        lat: Double? = null,
+        lng: Double? = null,
+        priceCategory: String = "medium",
+        distanceCategory: String = "medium",
         onComplete: (Boolean) -> Unit
     ) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -697,7 +793,11 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     "category_id" to categoryId,
                     "rating" to rating,
                     "image_url" to imageUrl,
-                    "is_active" to isActive
+                    "is_active" to isActive,
+                    "lat" to lat,
+                    "lng" to lng,
+                    "price_category" to priceCategory,
+                    "distance_category" to distanceCategory
                 )
 
                 firestore.collection("service_providers").document(providerId.toString())
@@ -739,7 +839,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // PENDING PROVIDERS (REGISTRATION REQUESTS)
-    fun addPendingProvider(name: String, phone: String, categoryId: Int, region: String, onComplete: (Boolean) -> Unit) {
+    fun addPendingProvider(name: String, phone: String, categoryId: Int, region: String, imageUrl: String?, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val id = firestore.collection("pending_providers").document().id
@@ -749,6 +849,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     phone = phone,
                     categoryId = categoryId,
                     region = region,
+                    imageUrl = imageUrl,
                     status = "pending",
                     createdAt = System.currentTimeMillis().toString()
                 )
@@ -778,7 +879,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     phone = pending.phone,
                     categoryId = pending.categoryId,
                     rating = 5.0,
-                    imageUrl = "",
+                    imageUrl = pending.imageUrl ?: "",
                     isActive = true,
                     createdAt = System.currentTimeMillis().toString()
                 )
@@ -786,6 +887,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 firestore.collection("service_providers").document(nextId.toString())
                     .set(provider)
                     .addOnSuccessListener {
+                        try {
+                            NotificationHelper.scheduleNotification(
+                                getApplication(),
+                                "تهانينا! تم تفعيل حسابك 🏆",
+                                "مرحباً بك ${pending.name}، تم الموافقة على انضمامك كمهني!"
+                            )
+                        } catch (e: Exception) {
+                            Log.e("DaliliViewModel", "Approval notification failed", e)
+                        }
+
                         if (pending.id != null) {
                             firestore.collection("pending_providers").document(pending.id)
                                 .delete()
@@ -832,11 +943,56 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         _customAppLogo.value = logo
     }
 
-    // Dummy getters to prevent breaking main calling components
-    fun getSupabaseUrl(): String = "https://example.supabase.co"
-    fun getSupabaseKey(): String = "example"
-    fun updateSupabaseConfig(url: String, key: String) {
-        // No-op
+    fun updateSystemConfig(phone: String, email: String, whatsapp: String, footer: String, showF: Boolean, onComplete: (Boolean) -> Unit = {}) {
+        val data = mapOf(
+            "support_phone" to phone,
+            "support_email" to email,
+            "support_whatsapp" to whatsapp,
+            "footer_text" to footer,
+            "show_footer" to showF
+        )
+        firestore.collection("settings").document("app_config")
+            .set(data)
+            .addOnSuccessListener { onComplete(true) }
+            .addOnFailureListener { onComplete(false) }
+    }
+
+    fun incrementUserLaunches() {
+        val docRef = firestore.collection("stats").document("app_usage")
+        firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(docRef)
+            val currentLaunches = snapshot.getLong("user_launches") ?: 0
+            val currentCalls = snapshot.getLong("calls_count") ?: 0
+            transaction.set(docRef, mapOf(
+                "user_launches" to currentLaunches + 1,
+                "calls_count" to currentCalls
+            ))
+            null
+        }.addOnFailureListener {
+            firestore.collection("stats").document("app_usage").set(mapOf(
+                "user_launches" to 1,
+                "calls_count" to 0
+            ))
+        }
+    }
+
+    fun incrementCallsCount() {
+        val docRef = firestore.collection("stats").document("app_usage")
+        firestore.runTransaction { transaction ->
+            val snapshot = transaction.get(docRef)
+            val currentLaunches = snapshot.getLong("user_launches") ?: 0
+            val currentCalls = snapshot.getLong("calls_count") ?: 0
+            transaction.set(docRef, mapOf(
+                "user_launches" to currentLaunches,
+                "calls_count" to currentCalls + 1
+            ))
+            null
+        }.addOnFailureListener {
+            firestore.collection("stats").document("app_usage").set(mapOf(
+                "user_launches" to 1,
+                "calls_count" to 1
+            ))
+        }
     }
 
     // IMAGE FILE UPLOAD
@@ -867,6 +1023,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // SMART ASSISTANT METHODS
+    fun addChatMessage(message: String, isUser: Boolean) {
+        val current = _chatHistory.value.toMutableList()
+        current.add(Pair(message, isUser))
+        _chatHistory.value = current
+    }
+
     fun askAssistant(question: String) {
         if (question.trim().isEmpty()) return
 
@@ -981,6 +1143,36 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private fun getOfflineAnswer(question: String): String {
         val providers = _serviceProviders.value.filter { it.isActive }
         val categories = _categories.value
+        val qTrim = question.trim()
+
+        // Handle specific offline template queries requested by the user
+        if (qTrim.contains("أقسم") || qTrim.contains("الاقسام") || qTrim.contains("الأقسام") || qTrim.contains("اقسم")) {
+            return buildString {
+                append("📶 [الوضع المحلي] مرحباً بك! لا يتوفر اتصال بالإنترنت حالياً.\n")
+                append("الأقسام المتاحة حالياً في تطبيق دليلي هي:\n")
+                categories.forEach { append("📁 ${it.nameAr}\n") }
+                append("\nيمكنك تصفح أي قسم من الصفحة الرئيسية مباشرة بالضغط عليه.")
+            }
+        }
+        if (qTrim.contains("أتصل") || qTrim.contains("اتصل") || qTrim.contains("تواصل") || qTrim.contains("كيف")) {
+            return buildString {
+                append("📶 [الوضع المحلي] مرحباً بك! لا يتوفر اتصال بالإنترنت حالياً.\n")
+                append("كيفية الاتصال والتواصل بمقدمي الخدمة:\n")
+                append("1. اضغط على أي قسم من واجهة التطبيق الرئيسية.\n")
+                append("2. سيظهر لك مقدمو الخدمات المسجلين، وللتواصل المباشر يحتوي كل مقدم خدمة على:\n")
+                append("   📞 زر اتصال مباشر لإجراء مكالمة هاتفية.\n")
+                append("   💬 زر واتساب لفتح محادثة مباشرة وسريعة.\n")
+                append("   ✉️ زر إرسال رسالة SMS لإرسال رسالة نصية.")
+            }
+        }
+        if (qTrim.contains("دعم") || qTrim.contains("رقم") || qTrim.contains("مساعدة")) {
+            return buildString {
+                append("📶 [الوضع المحلي] مرحباً بك! لا يتوفر اتصال بالإنترنت حالياً.\n")
+                append("رقم الدعم الفني والمساعدة هو:\n")
+                append("📞 777644670\n")
+                append("يسعدنا تواصلكم معنا للاستفسار أو تعديل نص التذييل.")
+            }
+        }
 
         val matchedProviders = providers.filter { 
             it.name.contains(question, ignoreCase = true) || 
@@ -1034,12 +1226,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun getDefaultProviders(): List<ServiceProvider> {
         return listOf(
-            ServiceProvider(id = 2001, name = "مؤسسة الاتصالات والشبكات والإنترنت المتكاملة", phone = "777644670", categoryId = 1001, rating = 5.0, imageUrl = "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c", isActive = true),
-            ServiceProvider(id = 2002, name = "المهندس أحمد لصيانة التكييف والأجهزة المنزلية", phone = "711223344", categoryId = 1002, rating = 4.8, imageUrl = "https://images.unsplash.com/photo-1581092160607-ee22621dd758", isActive = true),
-            ServiceProvider(id = 2003, name = "أخصائي الطقس والتمريض المنزلي السريع", phone = "770011223", categoryId = 1003, rating = 5.0, imageUrl = "https://images.unsplash.com/photo-1559839734-2b71ea197ec2", isActive = true),
-            ServiceProvider(id = 2004, name = "تاكسي المشوار السريع للتنقل والرحلات", phone = "777644670", categoryId = 1004, rating = 4.9, imageUrl = "https://images.unsplash.com/photo-1549417229-aa67d3263c09", isActive = true),
-            ServiceProvider(id = 2005, name = "أستاذ الرياضيات والفيزياء الخصوصي", phone = "733445566", categoryId = 1005, rating = 4.7, imageUrl = "https://images.unsplash.com/photo-1434030216411-0b793f4b4173", isActive = true),
-            ServiceProvider(id = 2006, name = "مطعم الطاهي اليمني للوجبات السريعة والتوصيل", phone = "775566778", categoryId = 1006, rating = 4.6, imageUrl = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38", isActive = true)
+            ServiceProvider(id = 2001, name = "مؤسسة الاتصالات والشبكات والإنترنت المتكاملة", phone = "777644670", categoryId = 1001, rating = 5.0, imageUrl = "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c", isActive = true, lat = 15.3694, lng = 44.1910, priceCategory = "low", distanceCategory = "near"),
+            ServiceProvider(id = 2002, name = "المهندس أحمد لصيانة التكييف والأجهزة المنزلية", phone = "711223344", categoryId = 1002, rating = 4.8, imageUrl = "https://images.unsplash.com/photo-1581092160607-ee22621dd758", isActive = true, lat = 15.3500, lng = 44.2000, priceCategory = "medium", distanceCategory = "medium"),
+            ServiceProvider(id = 2003, name = "أخصائي الطقس والتمريض المنزلي السريع", phone = "770011223", categoryId = 1003, rating = 5.0, imageUrl = "https://images.unsplash.com/photo-1559839734-2b71ea197ec2", isActive = true, lat = 15.3600, lng = 44.1800, priceCategory = "high", distanceCategory = "far"),
+            ServiceProvider(id = 2004, name = "تاكسي المشوار السريع للتنقل والرحلات", phone = "777644670", categoryId = 1004, rating = 4.9, imageUrl = "https://images.unsplash.com/photo-1549417229-aa67d3263c09", isActive = true, lat = 15.3700, lng = 44.2100, priceCategory = "medium", distanceCategory = "near"),
+            ServiceProvider(id = 2005, name = "أستاذ الرياضيات والفيزياء الخصوصي", phone = "733445566", categoryId = 1005, rating = 4.7, imageUrl = "https://images.unsplash.com/photo-1434030216411-0b793f4b4173", isActive = true, lat = 15.3340, lng = 44.2010, priceCategory = "low", distanceCategory = "medium"),
+            ServiceProvider(id = 2006, name = "مطعم الطاهي اليمني للوجبات السريعة والتوصيل", phone = "775566778", categoryId = 1006, rating = 4.6, imageUrl = "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38", isActive = true, lat = 15.3660, lng = 44.1750, priceCategory = "medium", distanceCategory = "near")
         )
     }
 

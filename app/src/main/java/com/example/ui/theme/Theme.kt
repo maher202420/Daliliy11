@@ -56,9 +56,9 @@ fun MyApplicationTheme(
 ) {
     val activeColorScheme = when (themeChoice) {
         "red_black" -> DarkRedBlackScheme
-        "modern_slate" -> DarkModernSlateScheme
-        "emerald_oasis" -> DarkEmeraldScheme
-        "indigo_sky" -> DarkRoyalIndigoScheme
+        "slate_silver" -> DarkModernSlateScheme
+        "emerald_green" -> DarkEmeraldScheme
+        "royal_indigo" -> DarkRoyalIndigoScheme
         else -> DarkRedBlackScheme
     }
 

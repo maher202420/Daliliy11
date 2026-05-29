@@ -30,7 +30,11 @@ data class ServiceProvider(
     @Json(name = "rating") val rating: Double = 5.0,
     @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "is_active") val isActive: Boolean = true,
-    @Json(name = "created_at") val createdAt: String? = null
+    @Json(name = "created_at") val createdAt: String? = null,
+    @Json(name = "lat") val lat: Double? = null,
+    @Json(name = "lng") val lng: Double? = null,
+    @Json(name = "price_category") val priceCategory: String = "medium", // "low", "medium", "high"
+    @Json(name = "distance_category") val distanceCategory: String = "medium" // "near", "medium", "far"
 )
 
 @JsonClass(generateAdapter = true)
@@ -50,6 +54,7 @@ data class PendingProvider(
     @Json(name = "phone") val phone: String,
     @Json(name = "category_id") val categoryId: Int,
     @Json(name = "region") val region: String,
+    @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "status") val status: String = "pending",
     @Json(name = "created_at") val createdAt: String? = null
 )
