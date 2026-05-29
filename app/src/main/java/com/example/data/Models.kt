@@ -43,3 +43,13 @@ data class Review(
     @Json(name = "created_at") val createdAt: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class PendingProvider(
+    @Json(name = "id") val id: String? = null,
+    @Json(name = "name") val name: String,
+    @Json(name = "phone") val phone: String,
+    @Json(name = "category_id") val categoryId: Int,
+    @Json(name = "region") val region: String,
+    @Json(name = "status") val status: String = "pending",
+    @Json(name = "created_at") val createdAt: String? = null
+)

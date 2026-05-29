@@ -2,22 +2,34 @@ package com.example.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import com.google.firebase.storage.FirebaseStorage
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.Response
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.MessageDigest
 
 class DaliliViewModel(application: Application) : AndroidViewModel(application) {
 
     private val sharedPrefs = application.getSharedPreferences("dalili_prefs", Context.MODE_PRIVATE)
+    private val firestore = FirebaseFirestore.getInstance()
 
     private val _categories = MutableStateFlow<List<Category>>(emptyList())
     val categories = _categories.asStateFlow()
@@ -30,6 +42,9 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _admins = MutableStateFlow<List<Admin>>(emptyList())
     val admins = _admins.asStateFlow()
+
+    private val _pendingProviders = MutableStateFlow<List<PendingProvider>>(emptyList())
+    val pendingProviders = _pendingProviders.asStateFlow()
 
     private val _currentUser = MutableStateFlow<Admin?>(null)
     val currentUser = _currentUser.asStateFlow()
@@ -55,39 +70,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery = _searchQuery.asStateFlow()
 
-    private var realtimeClient: RealtimeClient? = null
+    private val _chatHistory = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
+    val chatHistory = _chatHistory.asStateFlow()
 
-    // Moshi serializers for caching lists database states securely to SharedPreferences
-    private val moshi = Moshi.Builder()
-        .addLast(KotlinJsonAdapterFactory())
-        .build()
+    private val _isAssistantLoading = MutableStateFlow(false)
+    val isAssistantLoading = _isAssistantLoading.asStateFlow()
 
-    private val categoriesAdapter by lazy {
-        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Category::class.java)
-        moshi.adapter<List<Category>>(type)
-    }
-
-    private val providersAdapter by lazy {
-        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, ServiceProvider::class.java)
-        moshi.adapter<List<ServiceProvider>>(type)
-    }
-
-    private val reviewsAdapter by lazy {
-        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Review::class.java)
-        moshi.adapter<List<Review>>(type)
-    }
-
-    private val adminsAdapter by lazy {
-        val type = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
-        moshi.adapter<List<Admin>>(type)
-    }
+    private val _isArabic = MutableStateFlow(sharedPrefs.getBoolean("app_lang_ar", true))
+    val isArabic = _isArabic.asStateFlow()
 
     init {
-        // Load custom saved Supabase project credentials if found, otherwise use initial default coordinates
-        val savedBaseUrl = sharedPrefs.getString("custom_supabase_url", "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/") ?: "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/"
-        val savedApiKey = sharedPrefs.getString("custom_supabase_key", "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx") ?: "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx"
-        SupabaseClient.updateConfig(savedBaseUrl, savedApiKey)
-
         // Recover logged in user session if present
         val savedUsername = sharedPrefs.getString("saved_username", null)
         val savedRole = sharedPrefs.getString("saved_role", null)
@@ -99,178 +91,245 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        // Load Cached lists or Local Arabian Defaults state so the screen is never blank on boot!
-        _categories.value = loadCategoriesCache()
-        _serviceProviders.value = loadProvidersCache()
-        _reviews.value = loadReviewsCache()
-        _admins.value = loadAdminsCache()
+        // Start Firebase Realtime listeners
+        startListeningFirebase()
+    }
 
-        // Initialize Realtime WebSocket Sync with Hot reload dynamic properties
-        realtimeClient = RealtimeClient {
-            refreshDataSilent()
-        }
-        realtimeClient?.start()
-
-        // Initial live server fetch over cloud
-        refreshAll()
-
-        // Start safety periodic refresh (fallback in case web socket drops out of boundary)
-        viewModelScope.launch {
-            while (true) {
-                delay(12000) // 12 seconds
-                refreshDataSilent()
+    private fun startListeningFirebase() {
+        // 1. Categories Listener
+        firestore.collection("categories")
+            .orderBy("order_index", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen categories failed", error)
+                    _isCloudConnected.value = false
+                    return@addSnapshotListener
+                }
+                _isCloudConnected.value = true
+                if (snapshot != null) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
+                            val nameAr = doc.getString("name_ar") ?: ""
+                            val icon = doc.getString("icon") ?: "📁"
+                            val orderIndex = doc.getLong("order_index")?.toInt() ?: 0
+                            Category(id = id, nameAr = nameAr, icon = icon, orderIndex = orderIndex)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (list.isEmpty()) {
+                        _categories.value = getDefaultCategories()
+                        autoPopulateDefaultCategories()
+                    } else {
+                        _categories.value = list
+                    }
+                }
             }
+
+        // 2. Service Providers Listener
+        firestore.collection("service_providers")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen providers failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
+                            val name = doc.getString("name") ?: ""
+                            val phone = doc.getString("phone") ?: ""
+                            val categoryId = doc.getLong("category_id")?.toInt() ?: 0
+                            val rating = doc.getDouble("rating") ?: 5.0
+                            val imageUrl = doc.getString("image_url")
+                            val isActive = doc.getBoolean("is_active") ?: true
+                            ServiceProvider(id = id, name = name, phone = phone, categoryId = categoryId, rating = rating, imageUrl = imageUrl, isActive = isActive)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (list.isEmpty()) {
+                        _serviceProviders.value = getDefaultProviders()
+                        autoPopulateDefaultProviders()
+                    } else {
+                        _serviceProviders.value = list
+                    }
+                }
+            }
+
+        // 3. Reviews Listener
+        firestore.collection("reviews")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
+                            val providerId = doc.getLong("provider_id")?.toInt() ?: 0
+                            val userName = doc.getString("user_name") ?: ""
+                            val comment = doc.getString("comment") ?: ""
+                            val rating = doc.getDouble("rating") ?: 5.0
+                            val createdAt = doc.getString("created_at")
+                            Review(id = id, providerId = providerId, userName = userName, comment = comment, rating = rating, createdAt = createdAt)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (list.isEmpty()) {
+                        _reviews.value = getDefaultReviews()
+                        autoPopulateDefaultReviews()
+                    } else {
+                        _reviews.value = list
+                    }
+                }
+            }
+
+        // 4. Admins Listener
+        firestore.collection("admins")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
+                            val username = doc.getString("username") ?: ""
+                            val passwordHash = doc.getString("password_hash") ?: ""
+                            val role = doc.getString("role") ?: "admin"
+                            val createdAt = doc.getString("created_at")
+                            Admin(id = id, username = username, passwordHash = passwordHash, role = role, createdAt = createdAt)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    if (list.isEmpty()) {
+                        autoPopulateDefaultAdmins()
+                    } else {
+                        _admins.value = list
+                    }
+                }
+            }
+
+        // 5. Pending Providers Listener
+        firestore.collection("pending_providers")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.id
+                            val name = doc.getString("name") ?: ""
+                            val phone = doc.getString("phone") ?: ""
+                            val categoryId = doc.getLong("category_id")?.toInt() ?: 0
+                            val region = doc.getString("region") ?: ""
+                            val status = doc.getString("status") ?: "pending"
+                            val createdAt = doc.getString("created_at")
+                            PendingProvider(id = id, name = name, phone = phone, categoryId = categoryId, region = region, status = status, createdAt = createdAt)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    _pendingProviders.value = list
+                }
+            }
+    }
+
+    // Auto-population functions
+    private fun autoPopulateDefaultCategories() {
+        val defaults = getDefaultCategories()
+        for (cat in defaults) {
+            val data = mapOf(
+                "id" to cat.id,
+                "name_ar" to cat.nameAr,
+                "icon" to cat.icon,
+                "order_index" to cat.orderIndex,
+                "created_at" to System.currentTimeMillis().toString()
+            )
+            firestore.collection("categories").document(cat.id.toString()).set(data)
         }
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        realtimeClient?.stop()
+    private fun autoPopulateDefaultProviders() {
+        val defaults = getDefaultProviders()
+        for (p in defaults) {
+            val data = mapOf(
+                "id" to p.id,
+                "name" to p.name,
+                "phone" to p.phone,
+                "category_id" to p.categoryId,
+                "rating" to p.rating,
+                "image_url" to p.imageUrl,
+                "is_active" to p.isActive,
+                "created_at" to System.currentTimeMillis().toString()
+            )
+            firestore.collection("service_providers").document(p.id.toString()).set(data)
+        }
     }
 
-    fun setSearchQuery(query: String) {
-        _searchQuery.value = query
+    private fun autoPopulateDefaultReviews() {
+        val defaults = getDefaultReviews()
+        for (rev in defaults) {
+            val data = mapOf(
+                "id" to rev.id,
+                "provider_id" to rev.providerId,
+                "user_name" to rev.userName,
+                "comment" to rev.comment,
+                "rating" to rev.rating,
+                "created_at" to rev.createdAt
+            )
+            firestore.collection("reviews").document(rev.id.toString()).set(data)
+        }
+    }
+
+    private fun autoPopulateDefaultAdmins() {
+        val superAdmin = Admin(
+            id = 1,
+            username = "admin",
+            passwordHash = "maher736462", // can be checked literally as requested
+            role = "super_admin",
+            createdAt = System.currentTimeMillis().toString()
+        )
+        val data = mapOf(
+            "id" to superAdmin.id,
+            "username" to superAdmin.username,
+            "password_hash" to superAdmin.passwordHash,
+            "role" to superAdmin.role,
+            "created_at" to superAdmin.createdAt
+        )
+        firestore.collection("admins").document("1").set(data)
+    }
+
+    // SHARED PREFERENCES THEME & LANGUAGE CONFIG
+    fun getAppTheme(): String {
+        return sharedPrefs.getString("app_theme_choice", "light") ?: "light"
+    }
+
+    fun setAppTheme(theme: String) {
+        sharedPrefs.edit().putString("app_theme_choice", theme).apply()
+        _currentTheme.value = theme
+    }
+
+    fun toggleDarkMode() {
+        val next = if (_currentTheme.value == "dark") "light" else "dark"
+        setAppTheme(next)
+    }
+
+    fun toggleLanguage() {
+        val next = !_isArabic.value
+        sharedPrefs.edit().putBoolean("app_lang_ar", next).apply()
+        _isArabic.value = next
+    }
+
+    fun refreshAll() {
+        startListeningFirebase()
     }
 
     fun clearError() {
         _errorMessage.value = null
     }
 
-    // GET / SET SUPABASE DYNAMIC CONFIGS
-    fun getSupabaseUrl(): String {
-        return sharedPrefs.getString("custom_supabase_url", "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/") ?: "https://sazbudkuzxbvmuztaxeg.supabase.co/rest/v1/"
-    }
-
-    fun getSupabaseKey(): String {
-        return sharedPrefs.getString("custom_supabase_key", "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx") ?: "sb_publishable_vvR8V-Y4Ge4-PMZa1AuFnQ_t9TJrwnx"
-    }
-
-    fun updateSupabaseConfig(newUrl: String, newKey: String, onComplete: (Boolean) -> Unit) {
-        sharedPrefs.edit()
-            .putString("custom_supabase_url", newUrl.trim())
-            .putString("custom_supabase_key", newKey.trim())
-            .apply()
-
-        SupabaseClient.updateConfig(newUrl.trim(), newKey.trim())
-
-        // Reconnect realtime WebSocket synchronization dynamically
-        realtimeClient?.stop()
-        realtimeClient = RealtimeClient {
-            refreshDataSilent()
-        }
-        realtimeClient?.start()
-
-        refreshAll()
-        onComplete(true)
-    }
-
-    // GET / SET DYNAMIC COMPOSABLE SYSTEM THEME
-    fun getAppTheme(): String {
-        return sharedPrefs.getString("app_theme_choice", "red_black") ?: "red_black"
-    }
-
-    fun setAppTheme(themeId: String) {
-        sharedPrefs.edit().putString("app_theme_choice", themeId).apply()
-        _currentTheme.value = themeId
-    }
-
-    fun updateAppNameAndLogo(newName: String, newLogo: String) {
-        sharedPrefs.edit()
-            .putString("custom_app_name", newName.trim())
-            .putString("custom_app_logo", newLogo.trim())
-            .apply()
-        _customAppName.value = newName.trim()
-        _customAppLogo.value = newLogo.trim()
-    }
-
-    fun refreshAll() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _isLoading.value = true
-            _errorMessage.value = null
-            try {
-                fetchCategories()
-                fetchServiceProviders()
-                fetchReviews()
-                if (_currentUser.value?.role == "super_admin") {
-                    fetchAdmins()
-                }
-                _isCloudConnected.value = true
-            } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Error refreshing data", e)
-                _isCloudConnected.value = false
-                _errorMessage.value = "الوضع المحلي النشط: خطأ بالاتصال بالخادم السحابي"
-            } finally {
-                _isLoading.value = false
-            }
-        }
-    }
-
-    private fun refreshDataSilent() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                fetchCategories()
-                fetchServiceProviders()
-                fetchReviews()
-                if (_currentUser.value?.role == "super_admin") {
-                    fetchAdmins()
-                }
-                _isCloudConnected.value = true
-            } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Silent refresh failed (offline mode)", e)
-                _isCloudConnected.value = false
-            }
-        }
-    }
-
-    private suspend fun fetchCategories() {
-        try {
-            val fetched = SupabaseClient.api.getCategories()
-            if (fetched.isNotEmpty()) {
-                val sorted = fetched.sortedBy { it.orderIndex }
-                _categories.value = sorted
-                saveCategoriesCache(sorted)
-            }
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Failed to get categories from server", e)
-            throw e
-        }
-    }
-
-    private suspend fun fetchServiceProviders() {
-        try {
-            val fetched = SupabaseClient.api.getServiceProviders()
-            if (fetched.isNotEmpty()) {
-                _serviceProviders.value = fetched
-                saveProvidersCache(fetched)
-            }
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Failed to get service providers from server", e)
-            throw e
-        }
-    }
-
-    private suspend fun fetchReviews() {
-        try {
-            val fetched = SupabaseClient.api.getReviews()
-            if (fetched.isNotEmpty()) {
-                _reviews.value = fetched
-                saveReviewsCache(fetched)
-            }
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Failed to fetch reviews", e)
-        }
-    }
-
-    private suspend fun fetchAdmins() {
-        try {
-            val fetched = SupabaseClient.api.getAdmins()
-            if (fetched.isNotEmpty()) {
-                _admins.value = fetched
-                saveAdminsCache(fetched)
-            }
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Failed to get admins list", e)
-        }
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
     }
 
     // AUTHENTICATION
@@ -282,27 +341,19 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 // Hardcoded fallback override for Super Admin
                 if (usernameInput.trim() == "admin" && passwordInput == "maher736462") {
                     val rootAdmin = Admin(
-                        id = null,
+                        id = 1,
                         username = "admin",
                         passwordHash = passwordInput,
                         role = "super_admin"
                     )
                     _currentUser.value = rootAdmin
                     persistSession(rootAdmin)
-                    fetchAdmins()
                     handlerSuccessOnMain { onResult(true, null) }
                     return@launch
                 }
 
-                // Query database, falling back automatically to offline cache list if network error!
-                val adminsFromDb = try {
-                    SupabaseClient.api.getAdmins()
-                } catch (e: Exception) {
-                    Log.e("DaliliViewModel", "Admins network fetch failed. Authenticating with local lists.", e)
-                    _admins.value
-                }
-
-                val matchedAdmin = adminsFromDb.firstOrNull { it.username.trim() == usernameInput.trim() }
+                val adminsFromDb = _admins.value
+                val matchedAdmin = adminsFromDb.firstOrNull { it.username.trim().equals(usernameInput.trim(), ignoreCase = true) }
 
                 if (matchedAdmin != null) {
                     val hashedInput = hashPasswordHelper(passwordInput)
@@ -312,9 +363,6 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     if (matchSuccessful) {
                         _currentUser.value = matchedAdmin
                         persistSession(matchedAdmin)
-                        if (matchedAdmin.role == "super_admin" || matchedAdmin.username == "admin") {
-                            fetchAdmins()
-                        }
                         handlerSuccessOnMain { onResult(true, null) }
                     } else {
                         handlerSuccessOnMain { onResult(false, "كلمة المرور غير صحيحة") }
@@ -333,25 +381,33 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     fun logout() {
         _currentUser.value = null
-        _admins.value = emptyList()
-        val customUrl = getSupabaseUrl()
-        val customKey = getSupabaseKey()
         val theme = getAppTheme()
+        val lang = _isArabic.value
+        val appName = _customAppName.value
+        val appLogo = _customAppLogo.value
 
         sharedPrefs.edit().clear().apply()
 
-        // Keep connection credentials on logout so admin does not lose connection coordinates
+        // Restore custom preferences on logout
         sharedPrefs.edit()
-            .putString("custom_supabase_url", customUrl)
-            .putString("custom_supabase_key", customKey)
             .putString("app_theme_choice", theme)
+            .putBoolean("app_lang_ar", lang)
+            .putString("custom_app_name", appName)
+            .putString("custom_app_logo", appLogo)
             .apply()
     }
 
-    private fun persistSession(admin: Admin) {
+    fun persistSession(admin: Admin) {
         sharedPrefs.edit()
             .putString("saved_username", admin.username)
             .putString("saved_role", admin.role)
+            .apply()
+    }
+
+    fun clearSavedSession() {
+        sharedPrefs.edit()
+            .remove("saved_username")
+            .remove("saved_role")
             .apply()
     }
 
@@ -365,30 +421,23 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _isLoading.value = true
             try {
                 val hashed = hashPasswordHelper(passwordInput)
+                val newId = (_admins.value.mapNotNull { it.id }.maxOrNull() ?: 10) + 1
                 val newAdmin = Admin(
+                    id = newId,
                     username = usernameInput,
                     passwordHash = hashed,
-                    role = "admin"
+                    role = "admin",
+                    createdAt = System.currentTimeMillis().toString()
                 )
 
-                try {
-                    SupabaseClient.api.createAdmin(newAdmin)
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote addAdmin failed, fallback local write", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم الحفظ محلياً لعدم توفر إنترنت"
+                firestore.collection("admins").document(newId.toString())
+                    .set(newAdmin)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                // Ensure local data state is fully modified offline-ready
-                val currentList = _admins.value.toMutableList()
-                val nextId = (currentList.map { it.id ?: 0 }.maxOrNull() ?: 10) + 1
-                currentList.add(newAdmin.copy(id = nextId))
-                _admins.value = currentList
-                saveAdminsCache(currentList)
-
-                fetchAdmins()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add admin failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -403,26 +452,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _isLoading.value = true
             try {
                 val hashed = hashPasswordHelper(newPasswordInput)
-                
-                try {
-                    val updates = mapOf("password_hash" to hashed)
-                    SupabaseClient.api.updateAdmin("eq.$adminId", updates)
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote password update failed, fallback local update", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم تغيير كلمة المرور محلياً"
+                firestore.collection("admins").document(adminId.toString())
+                    .update("password_hash", hashed)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                // Apply update to local persistence
-                val currentList = _admins.value.map {
-                    if (it.id == adminId) it.copy(passwordHash = hashed) else it
-                }
-                _admins.value = currentList
-                saveAdminsCache(currentList)
-
-                fetchAdmins()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Change pass failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -436,21 +473,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                try {
-                    SupabaseClient.api.deleteAdmin("eq.$adminId")
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote deleteAdmin failed, fallback local wipe", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم المسح محلياً لعدم توفر إنترنت"
+                firestore.collection("admins").document(adminId.toString())
+                    .delete()
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _admins.value.filter { it.id != adminId }
-                _admins.value = currentList
-                saveAdminsCache(currentList)
-
-                fetchAdmins()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete admin failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -464,33 +494,25 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun addReview(providerId: Int, userName: String, comment: String, rating: Double, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val nextId = (_reviews.value.mapNotNull { it.id }.maxOrNull() ?: 3000) + 1
                 val review = Review(
+                    id = nextId,
                     providerId = providerId,
                     userName = userName,
                     comment = comment,
-                    rating = rating
+                    rating = rating,
+                    createdAt = System.currentTimeMillis().toString()
                 )
-                try {
-                    SupabaseClient.api.createReview(review)
-                } catch (e: Exception) {
-                    Log.e("DaliliViewModel", "Remote submit review failed, fallback locale", e)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم إضافة التعليق والتقييم محلياً بنجاح"
+
+                firestore.collection("reviews").document(nextId.toString())
+                    .set(review)
+                    .addOnSuccessListener {
+                        recalculateAndSaveProviderRating(providerId)
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                // Backup local reviews lists
-                val currentList = _reviews.value.toMutableList()
-                val nextId = (currentList.map { it.id ?: 0 }.maxOrNull() ?: 3000) + 1
-                currentList.add(0, review.copy(id = nextId))
-                _reviews.value = currentList
-                saveReviewsCache(currentList)
-
-                // Update ratings on active providers lists
-                recalculateAndSaveProviderRating(providerId)
-
-                fetchReviews()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add review error", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -502,26 +524,18 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                try {
-                    SupabaseClient.api.deleteReview("eq.$reviewId")
-                } catch (e: Exception) {
-                    Log.e("DaliliViewModel", "Remote deleteReview failed, fallback wipe locale", e)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم حذف التعليق محلياً بنجاح"
-                    }
-                }
-
                 val reviewTarget = _reviews.value.firstOrNull { it.id == reviewId }
-                val currentList = _reviews.value.filter { it.id != reviewId }
-                _reviews.value = currentList
-                saveReviewsCache(currentList)
-
-                if (reviewTarget != null) {
-                    recalculateAndSaveProviderRating(reviewTarget.providerId)
-                }
-
-                fetchReviews()
-                handlerSuccessOnMain { onComplete(true) }
+                firestore.collection("reviews").document(reviewId.toString())
+                    .delete()
+                    .addOnSuccessListener {
+                        if (reviewTarget != null) {
+                            recalculateAndSaveProviderRating(reviewTarget.providerId)
+                        }
+                        handlerSuccessOnMain { onComplete(true) }
+                    }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete review error", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -540,13 +554,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             String.format("%.1f", avg).toDoubleOrNull() ?: 5.0
         }
 
-        val updatedProviders = _serviceProviders.value.map {
-            if (it.id == providerId) {
-                it.copy(rating = finalRating)
-            } else it
-        }
-        _serviceProviders.value = updatedProviders
-        saveProvidersCache(updatedProviders)
+        firestore.collection("service_providers").document(providerId.toString())
+            .update("rating", finalRating)
     }
 
     // MANAGE CATEGORIES (Admins and Super Admins)
@@ -554,30 +563,23 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
+                val nextId = (_categories.value.mapNotNull { it.id }.maxOrNull() ?: 1000) + 1
                 val category = Category(
+                    id = nextId,
                     nameAr = nameAr,
                     icon = icon,
-                    orderIndex = orderIndex
+                    orderIndex = orderIndex,
+                    createdAt = System.currentTimeMillis().toString()
                 )
 
-                try {
-                    SupabaseClient.api.createCategory(category)
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote createCategory failed, fallback local write", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم إضافة القسم محلياً دليلي"
+                firestore.collection("categories").document(nextId.toString())
+                    .set(category)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _categories.value.toMutableList()
-                val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 1000) + 1
-                currentList.add(category.copy(id = nextId))
-                val sorted = currentList.sortedBy { it.orderIndex }
-                _categories.value = sorted
-                saveCategoriesCache(sorted)
-
-                fetchCategories()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -591,30 +593,19 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                try {
-                    val updates = mapOf(
-                        "name_ar" to nameAr,
-                        "icon" to icon,
-                        "order_index" to orderIndex
-                    )
-                    SupabaseClient.api.updateCategory("eq.$categoryId", updates)
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote updateCategory failed, fallback local write", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم تعديل القسم محلياً بنجاح"
+                val updates = mapOf(
+                    "name_ar" to nameAr,
+                    "icon" to icon,
+                    "order_index" to orderIndex
+                )
+                firestore.collection("categories").document(categoryId.toString())
+                    .update(updates)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _categories.value.map {
-                    if (it.id == categoryId) {
-                        it.copy(nameAr = nameAr, icon = icon, orderIndex = orderIndex)
-                    } else it
-                }.sortedBy { it.orderIndex }
-                _categories.value = currentList
-                saveCategoriesCache(currentList)
-
-                fetchCategories()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -628,27 +619,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                try {
-                    SupabaseClient.api.deleteCategory("eq.$categoryId")
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote deleteCategory failed, fallback local wipe", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم حذف القسم محلياً بنجاح"
+                firestore.collection("categories").document(categoryId.toString())
+                    .delete()
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _categories.value.filter { it.id != categoryId }
-                _categories.value = currentList
-                saveCategoriesCache(currentList)
-
-                // Flush local orphaned service providers
-                val cleanProvidersList = _serviceProviders.value.filter { it.categoryId != categoryId }
-                _serviceProviders.value = cleanProvidersList
-                saveProvidersCache(cleanProvidersList)
-
-                fetchCategories()
-                fetchServiceProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -659,38 +637,40 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // MANAGE SERVICE PROVIDERS (Admins and Super Admins)
-    fun addServiceProvider(name: String, phone: String, categoryId: Int, rating: Double, imageUrl: String?, isActive: Boolean, onComplete: (Boolean) -> Unit) {
+    fun addServiceProvider(
+        name: String, 
+        phone: String, 
+        categoryId: Int, 
+        rating: Double, 
+        imageUrl: String, 
+        isActive: Boolean, 
+        onComplete: (Boolean) -> Unit
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
+                val nextId = (_serviceProviders.value.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
                 val provider = ServiceProvider(
+                    id = nextId,
                     name = name,
                     phone = phone,
                     categoryId = categoryId,
                     rating = rating,
-                    imageUrl = if (imageUrl.isNull_or_Empty()) null else imageUrl,
-                    isActive = isActive
+                    imageUrl = imageUrl,
+                    isActive = isActive,
+                    createdAt = System.currentTimeMillis().toString()
                 )
 
-                try {
-                    SupabaseClient.api.createServiceProvider(provider)
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote createServiceProvider failed, fallback local write", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم إضافة مقدم الخدمة محلياً"
+                firestore.collection("service_providers").document(nextId.toString())
+                    .set(provider)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _serviceProviders.value.toMutableList()
-                val nextId = (currentList.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
-                currentList.add(provider.copy(id = nextId))
-                _serviceProviders.value = currentList
-                saveProvidersCache(currentList)
-
-                fetchServiceProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Add provider failed", e)
+                Log.e("DaliliViewModel", "Add service provider fail", e)
                 handlerSuccessOnMain { onComplete(false) }
             } finally {
                 _isLoading.value = false
@@ -698,44 +678,36 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun updateServiceProvider(providerId: Int, name: String, phone: String, categoryId: Int, rating: Double, imageUrl: String?, isActive: Boolean, onComplete: (Boolean) -> Unit) {
+    fun updateServiceProvider(
+        providerId: Int,
+        name: String,
+        phone: String,
+        categoryId: Int,
+        rating: Double,
+        imageUrl: String?,
+        isActive: Boolean,
+        onComplete: (Boolean) -> Unit
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                try {
-                    val updates = mapOf(
-                        "name" to name,
-                        "phone" to phone,
-                        "category_id" to categoryId,
-                        "rating" to rating,
-                        "image_url" to (if (imageUrl.isNull_or_Empty()) "" else imageUrl!!),
-                        "is_active" to isActive
-                    )
-                    SupabaseClient.api.updateServiceProvider("eq.$providerId", updates)
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote updateServiceProvider failed, fallback local write", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم تعديل مقدم الخدمة محلياً"
+                val updates = mapOf(
+                    "name" to name,
+                    "phone" to phone,
+                    "category_id" to categoryId,
+                    "rating" to rating,
+                    "image_url" to imageUrl,
+                    "is_active" to isActive
+                )
+
+                firestore.collection("service_providers").document(providerId.toString())
+                    .update(updates)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _serviceProviders.value.map {
-                    if (it.id == providerId) {
-                        it.copy(
-                            name = name,
-                            phone = phone,
-                            categoryId = categoryId,
-                            rating = rating,
-                            imageUrl = if (imageUrl.isNull_or_Empty()) null else imageUrl,
-                            isActive = isActive
-                        )
-                    } else it
-                }
-                _serviceProviders.value = currentList
-                saveProvidersCache(currentList)
-
-                fetchServiceProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update provider failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -749,21 +721,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                try {
-                    SupabaseClient.api.deleteServiceProvider("eq.$providerId")
-                } catch (apiError: Exception) {
-                    Log.e("DaliliViewModel", "Remote deleteServiceProvider failed, fallback local wipe", apiError)
-                    handlerSuccessOnMain {
-                        _errorMessage.value = "تم حذف مقدم الخدمة محلياً"
+                firestore.collection("service_providers").document(providerId.toString())
+                    .delete()
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
                     }
-                }
-
-                val currentList = _serviceProviders.value.filter { it.id != providerId }
-                _serviceProviders.value = currentList
-                saveProvidersCache(currentList)
-
-                fetchServiceProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete provider failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -773,91 +738,289 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // CACHING UTILITIES
-    private fun saveCategoriesCache(list: List<Category>) {
-        try {
-            val json = categoriesAdapter.toJson(list)
-            sharedPrefs.edit().putString("cache_categories", json).apply()
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Write categories cache failed", e)
-        }
-    }
-
-    private fun loadCategoriesCache(): List<Category> {
-        val json = sharedPrefs.getString("cache_categories", null)
-        if (json != null) {
+    // PENDING PROVIDERS (REGISTRATION REQUESTS)
+    fun addPendingProvider(name: String, phone: String, categoryId: Int, region: String, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                return categoriesAdapter.fromJson(json) ?: emptyList()
+                val id = firestore.collection("pending_providers").document().id
+                val pending = PendingProvider(
+                    id = id,
+                    name = name,
+                    phone = phone,
+                    categoryId = categoryId,
+                    region = region,
+                    status = "pending",
+                    createdAt = System.currentTimeMillis().toString()
+                )
+
+                firestore.collection("pending_providers").document(id)
+                    .set(pending)
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
+                    }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Read categories cache failed", e)
+                Log.e("DaliliViewModel", "Add pending provider fail", e)
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
-        return getDefaultCategories()
     }
 
-    private fun saveProvidersCache(list: List<ServiceProvider>) {
-        try {
-            val json = providersAdapter.toJson(list)
-            sharedPrefs.edit().putString("cache_providers", json).apply()
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Write providers cache failed", e)
-        }
-    }
-
-    private fun loadProvidersCache(): List<ServiceProvider> {
-        val json = sharedPrefs.getString("cache_providers", null)
-        if (json != null) {
+    fun approvePendingProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                return providersAdapter.fromJson(json) ?: emptyList()
+                val nextId = (_serviceProviders.value.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
+                val provider = ServiceProvider(
+                    id = nextId,
+                    name = pending.name,
+                    phone = pending.phone,
+                    categoryId = pending.categoryId,
+                    rating = 5.0,
+                    imageUrl = "",
+                    isActive = true,
+                    createdAt = System.currentTimeMillis().toString()
+                )
+
+                firestore.collection("service_providers").document(nextId.toString())
+                    .set(provider)
+                    .addOnSuccessListener {
+                        if (pending.id != null) {
+                            firestore.collection("pending_providers").document(pending.id)
+                                .delete()
+                                .addOnSuccessListener { handlerSuccessOnMain { onComplete(true) } }
+                                .addOnFailureListener { handlerSuccessOnMain { onComplete(true) } }
+                        } else {
+                            handlerSuccessOnMain { onComplete(true) }
+                        }
+                    }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
             } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Read providers cache failed", e)
+                Log.e("DaliliViewModel", "Approve pending failed", e)
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
-        return getDefaultProviders()
     }
 
-    private fun saveReviewsCache(list: List<Review>) {
-        try {
-            val json = reviewsAdapter.toJson(list)
-            sharedPrefs.edit().putString("cache_reviews", json).apply()
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Write reviews cache failed", e)
-        }
-    }
-
-    private fun loadReviewsCache(): List<Review> {
-        val json = sharedPrefs.getString("cache_reviews", null)
-        if (json != null) {
-            try {
-                return reviewsAdapter.fromJson(json) ?: emptyList()
-            } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Read reviews cache failed", e)
+    fun rejectPendingProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            if (pending.id != null) {
+                firestore.collection("pending_providers").document(pending.id)
+                    .delete()
+                    .addOnSuccessListener {
+                        handlerSuccessOnMain { onComplete(true) }
+                    }
+                    .addOnFailureListener {
+                        handlerSuccessOnMain { onComplete(false) }
+                    }
+            } else {
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
-        return getDefaultReviews()
     }
 
-    private fun saveAdminsCache(list: List<Admin>) {
-        try {
-            val json = adminsAdapter.toJson(list)
-            sharedPrefs.edit().putString("cache_admins", json).apply()
-        } catch (e: Exception) {
-            Log.e("DaliliViewModel", "Write admins cache failed", e)
-        }
+    // BRANDING CUSTOMIZATION
+    fun updateAppNameAndLogo(name: String, logo: String) {
+        sharedPrefs.edit()
+            .putString("custom_app_name", name)
+            .putString("custom_app_logo", logo)
+            .apply()
+        _customAppName.value = name
+        _customAppLogo.value = logo
     }
 
-    private fun loadAdminsCache(): List<Admin> {
-        val json = sharedPrefs.getString("cache_admins", null)
-        if (json != null) {
+    // Dummy getters to prevent breaking main calling components
+    fun getSupabaseUrl(): String = "https://example.supabase.co"
+    fun getSupabaseKey(): String = "example"
+    fun updateSupabaseConfig(url: String, key: String) {
+        // No-op
+    }
+
+    // IMAGE FILE UPLOAD
+    fun uploadImageToFirebaseStorage(uri: Uri, folder: String, onComplete: (String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                return adminsAdapter.fromJson(json) ?: emptyList()
+                val storageRef = FirebaseStorage.getInstance().reference
+                val fileName = "${System.currentTimeMillis()}_${uri.lastPathSegment ?: "image"}.jpg"
+                val fileRef = storageRef.child("$folder/$fileName")
+
+                fileRef.putFile(uri)
+                    .addOnSuccessListener {
+                        fileRef.downloadUrl.addOnSuccessListener { downloadUri ->
+                            onComplete(downloadUri.toString())
+                        }.addOnFailureListener {
+                            onComplete(null)
+                        }
+                    }
+                    .addOnFailureListener {
+                        Log.e("DaliliViewModel", "Image upload failed to Storage", it)
+                        onComplete(null)
+                    }
             } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Read admins cache failed", e)
+                Log.e("DaliliViewModel", "Storage upload catch", e)
+                onComplete(null)
             }
         }
-        return emptyList()
     }
 
+    // SMART ASSISTANT METHODS
+    fun askAssistant(question: String) {
+        if (question.trim().isEmpty()) return
+
+        val current = _chatHistory.value.toMutableList()
+        current.add(Pair(question, true))
+        _chatHistory.value = current
+
+        _isAssistantLoading.value = true
+
+        viewModelScope.launch {
+            try {
+                val response = callGeminiApiDirect(question)
+                val updated = _chatHistory.value.toMutableList()
+                updated.add(Pair(response, false))
+                _chatHistory.value = updated
+            } catch (e: Exception) {
+                val response = getOfflineAnswer(question)
+                val updated = _chatHistory.value.toMutableList()
+                updated.add(Pair(response, false))
+                _chatHistory.value = updated
+            } finally {
+                _isAssistantLoading.value = false
+            }
+        }
+    }
+
+    private suspend fun callGeminiApiDirect(question: String): String = withContext(Dispatchers.IO) {
+        val apiKey = com.example.BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext "عذراً، لم يتم العثور على مفتاح Gemini API في إعدادات التطبيق. يرجى إدخال المفتاح في لوحة تحكم المشرفين لتفعيل المساعد الذكي بالكامل."
+        }
+
+        val categoriesText = _categories.value.map { "${it.nameAr} (معرف القسم: ${it.id})" }.joinToString(", ")
+        val providersText = _serviceProviders.value.filter { it.isActive }.map { "${it.name} (الهاتف: ${it.phone}, القسم: ${it.categoryId})" }.joinToString("\n")
+
+        val systemPrompt = "أنت مساعد دليل الخدمات الذكي (دليلي - Dalili) في اليمن. تجيب بلغة عربية يمنية ودودة ومباشرة وتساعد في العثور على أرقام الهواتف والتواصل مع مقدمي الخدمة.\n" +
+                "الأقسام المتاحة حالياً:\n$categoriesText\n\nمقدمو الخدمات النشطون حالياً:\n$providersText\n\nأجب باختصار واذكر معلومات الاتصال ومميزات مقدمي الخدمة لتفيد المستخدم."
+
+        val requestJson = JSONObject()
+        val contentsArray = JSONArray()
+
+        val historyToUse = _chatHistory.value.takeLast(10)
+        for (turn in historyToUse) {
+            val contentObject = JSONObject()
+            val role = if (turn.second) "user" else "model"
+            contentObject.put("role", role)
+
+            val partsArray = JSONArray()
+            val partObject = JSONObject()
+            partObject.put("text", turn.first)
+            partsArray.put(partObject)
+            contentObject.put("parts", partsArray)
+
+            contentsArray.put(contentObject)
+        }
+
+        requestJson.put("contents", contentsArray)
+
+        val sysInstructionObject = JSONObject()
+        val sysPartsArray = JSONArray()
+        val sysPartObject = JSONObject()
+        sysPartObject.put("text", systemPrompt)
+        sysPartsArray.put(sysPartObject)
+        sysInstructionObject.put("parts", sysPartsArray)
+        requestJson.put("systemInstruction", sysInstructionObject)
+
+        val genConfig = JSONObject()
+        genConfig.put("temperature", 0.7)
+        requestJson.put("generationConfig", genConfig)
+
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = RequestBody.create(mediaType, requestJson.toString())
+
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
+
+        val request = Request.Builder()
+            .url(url)
+            .post(body)
+            .build()
+
+        try {
+            val response: Response = client.newCall(request).execute()
+            val responseBodyString = response.body?.string() ?: ""
+            if (response.isSuccessful && responseBodyString.isNotEmpty()) {
+                val responseJson = JSONObject(responseBodyString)
+                val candidatesArray = responseJson.optJSONArray("candidates")
+                if (candidatesArray != null && candidatesArray.length() > 0) {
+                    val firstCandidate = candidatesArray.getJSONObject(0)
+                    val contentObj = firstCandidate.optJSONObject("content")
+                    if (contentObj != null) {
+                        val partsArr = contentObj.optJSONArray("parts")
+                        if (partsArr != null && partsArr.length() > 0) {
+                            return@withContext partsArr.getJSONObject(0).optString("text")
+                        }
+                    }
+                }
+            }
+            Log.e("DaliliViewModel", "API error: ${response.code} body: $responseBodyString")
+            throw Exception("API code ${response.code}")
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Gemini general call exception", e)
+            throw e
+        }
+    }
+
+    private fun getOfflineAnswer(question: String): String {
+        val providers = _serviceProviders.value.filter { it.isActive }
+        val categories = _categories.value
+
+        val matchedProviders = providers.filter { 
+            it.name.contains(question, ignoreCase = true) || 
+            question.contains(it.name, ignoreCase = true)
+        }
+
+        val matchedCategories = categories.filter { 
+            it.nameAr.contains(question, ignoreCase = true) || 
+            question.contains(it.nameAr, ignoreCase = true)
+        }
+
+        return buildString {
+            append("📶 [الوضع المحلي] مرحباً بك! لا يتوفر اتصال بالإنترنت حالياً.\n")
+            if (matchedProviders.isNotEmpty()) {
+                append("وجدنا مقدمي الخدمات المحليين التاليين لعرضهم:\n")
+                matchedProviders.forEach {
+                    append("- ${it.name} 📞 الهاتف: ${it.phone}\n")
+                }
+            } else if (matchedCategories.isNotEmpty()) {
+                val cat = matchedCategories.first()
+                append("بالنسبة لقسم \"${cat.nameAr}\"، يمكنك تصفح مقدمي خدماته بالاسم والهاتف في الصفحة الرئيسية للقسم.\n")
+                val catProviders = providers.filter { it.categoryId == cat.id }
+                if (catProviders.isNotEmpty()) {
+                    append("إليك بعض الأرقام في هذا القسم:\n")
+                    catProviders.take(3).forEach {
+                        append("- ${it.name} 📞 الهاتف: ${it.phone}\n")
+                    }
+                }
+            } else {
+                append("يمكنني البحث محلياً بالأقسام ومقدمي الخدمات. اكتب مثلاً 'طبيب' أو 'أحمد' أو 'صيانة'.\nالأقسام المتاحة: ")
+                append(categories.joinToString("، ") { it.nameAr })
+            }
+        }
+    }
+
+    fun clearChatHistory() {
+        _chatHistory.value = emptyList()
+    }
+
+    // Default static initializers in case Firestore is unreachable
     private fun getDefaultCategories(): List<Category> {
         return listOf(
             Category(id = 1001, nameAr = "خدمات الاتصالات والنت", icon = "📱", orderIndex = 1),
@@ -889,7 +1052,6 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    // SHA-256 Hashing helper
     private fun hashPasswordHelper(password: String): String {
         return try {
             val digest = MessageDigest.getInstance("SHA-256")
@@ -898,9 +1060,5 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Exception) {
             password
         }
-    }
-
-    private fun String?.isNull_or_Empty(): Boolean {
-        return this == null || this.trim().isEmpty()
     }
 }
