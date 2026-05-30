@@ -32,6 +32,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -619,7 +620,18 @@ fun HomeScreen(
                             modifier = Modifier.padding(14.dp).fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(appLogo, fontSize = 42.sp)
+                            if (appLogo.startsWith("http://") || appLogo.startsWith("https://")) {
+                                coil.compose.AsyncImage(
+                                    model = appLogo,
+                                    contentDescription = "شعار التطبيق",
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(androidx.compose.foundation.shape.CircleShape),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                )
+                            } else {
+                                Text(appLogo, fontSize = 42.sp)
+                            }
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(appName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(2.dp))
@@ -809,11 +821,23 @@ fun HomeScreen(
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text(
-                text = customAppLogoVal,
-                fontSize = 28.sp,
-                modifier = Modifier.padding(end = 8.dp)
-            )
+            if (customAppLogoVal.startsWith("http://") || customAppLogoVal.startsWith("https://")) {
+                coil.compose.AsyncImage(
+                    model = customAppLogoVal,
+                    contentDescription = "شعار التطبيق",
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .size(38.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Text(
+                    text = customAppLogoVal,
+                    fontSize = 28.sp,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
             Text(
                 text = customAppNameVal,
                 style = MaterialTheme.typography.headlineLarge,
@@ -1056,6 +1080,23 @@ fun CategoryProvidersScreen(
     val isAdmin = currentUser != null
     var qInput by remember { mutableStateOf("") }
     var activeProviderReviewsTarget by remember { mutableStateOf<ServiceProvider?>(null) }
+    var editingReviewTarget by remember { mutableStateOf<com.example.data.Review?>(null) }
+    var editedName by remember { mutableStateOf("") }
+    var editedComment by remember { mutableStateOf("") }
+    var editedRating by remember { mutableStateOf(5.0) }
+    var editErrorMsg by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.runtime.LaunchedEffect(editingReviewTarget) {
+        editingReviewTarget?.let {
+            editedName = it.userName
+            editedComment = it.comment
+            editedRating = it.rating
+            editErrorMsg = null
+        }
+    }
+
+    val sortStyle by viewModel.providersSortStyle.collectAsState()
+    val layoutStyle by viewModel.providersLayoutStyle.collectAsState()
     
     // Filtering states
     var showFilterDialog by remember { mutableStateOf(false) }
@@ -1085,9 +1126,9 @@ fun CategoryProvidersScreen(
         customOnBackClick()
     }
 
-    // Filter by Category ID & Filter query name & Advanced parameters
-    val filteredList = remember(allProviders, category.id, selectedSubCategory, qInput, ratingFilter, distanceFilter, priceFilter) {
-        allProviders.filter { 
+    // Filter by Category ID & Filter query name & Advanced parameters and sort by sortStyle
+    val filteredList = remember(allProviders, category.id, selectedSubCategory, qInput, ratingFilter, distanceFilter, priceFilter, sortStyle) {
+        val rawFiltered = allProviders.filter { 
             it.categoryId == category.id && 
             it.isActive &&
             (selectedSubCategory == null || it.subCategoryId == selectedSubCategory.id) &&
@@ -1095,6 +1136,18 @@ fun CategoryProvidersScreen(
             (ratingFilter == 0.0 || it.rating >= ratingFilter) &&
             (distanceFilter == "all" || it.distanceCategory == distanceFilter) &&
             (priceFilter == "all" || it.priceCategory == priceFilter)
+        }
+        
+        when (sortStyle) {
+            "pinned_first" -> {
+                rawFiltered.sortedWith(compareByDescending<ServiceProvider> { it.isPinned }.thenByDescending { it.rating })
+            }
+            "highest_rating" -> {
+                rawFiltered.sortedWith(compareByDescending<ServiceProvider> { it.rating }.thenByDescending { it.isPinned })
+            }
+            else -> {
+                rawFiltered.sortedWith(compareByDescending<ServiceProvider> { it.isPinned }.thenByDescending { it.id })
+            }
         }
     }
 
@@ -1388,24 +1441,39 @@ fun CategoryProvidersScreen(
                                     ) {
                                         // Trash bin for quick deletion by Admin
                                         if (isAdmin) {
-                                            IconButton(
-                                                onClick = {
-                                                    review.id?.let { rId ->
-                                                        viewModel.deleteReview(rId) { res ->
-                                                            if (res) {
-                                                                Toast.makeText(context, "تم حذف تعليق العميل بنجاح", Toast.LENGTH_SHORT).show()
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                IconButton(
+                                                    onClick = {
+                                                        editingReviewTarget = review
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Edit,
+                                                        contentDescription = "تعديل التعليق",
+                                                        tint = MaterialTheme.colorScheme.secondary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = {
+                                                        review.id?.let { rId ->
+                                                            viewModel.deleteReview(rId) { res ->
+                                                                if (res) {
+                                                                    Toast.makeText(context, "تم حذف تعليق العميل بنجاح", Toast.LENGTH_SHORT).show()
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = "حذف التعليق",
-                                                    tint = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
+                                                    },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Delete,
+                                                        contentDescription = "حذف التعليق",
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
                                             }
                                         } else {
                                             Spacer(modifier = Modifier.width(1.dp))
@@ -1537,6 +1605,96 @@ fun CategoryProvidersScreen(
                     ) {
                         Text("إرسال التقييم والتعليق", fontWeight = FontWeight.Bold, color = Color.White)
                     }
+                }
+            }
+        )
+    }
+
+    if (editingReviewTarget != null) {
+        val editableReview = editingReviewTarget!!
+        
+        AlertDialog(
+            onDismissRequest = { editingReviewTarget = null },
+            title = { Text("تعديل تعليق ومراجعة العميل", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Right) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    OutlinedTextField(
+                        value = editedName,
+                        onValueChange = { editedName = it },
+                        label = { Text("اسم العميل", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.End, textDirection = TextDirection.Rtl)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    
+                    OutlinedTextField(
+                        value = editedComment,
+                        onValueChange = { editedComment = it },
+                        label = { Text("التعليق المكتوب", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
+                        maxLines = 4,
+                        modifier = Modifier.fillMaxWidth(),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.End, textDirection = TextDirection.Rtl)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        repeat(5) { index ->
+                            val star = index + 1.0
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "Rating Star",
+                                tint = if (editedRating >= star) MaterialTheme.colorScheme.secondary else Color.LightGray,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clickable { editedRating = star }
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("التقييم الجديد:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    editErrorMsg?.let {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editedName.trim().isEmpty() || editedComment.trim().isEmpty()) {
+                            editErrorMsg = "الحقول لا يمكن أن تكون فارغة"
+                            return@Button
+                        }
+                        viewModel.updateReview(
+                            reviewId = editableReview.id ?: 0,
+                            userName = editedName.trim(),
+                            comment = editedComment.trim(),
+                            rating = editedRating
+                        ) { isOkay ->
+                            if (isOkay) {
+                                editingReviewTarget = null
+                                Toast.makeText(context, "تم تعديل المراجعة بنجاح", Toast.LENGTH_SHORT).show()
+                            } else {
+                                editErrorMsg = "فشل التحديث، يرجى المحاولة لاحقاً"
+                            }
+                        }
+                    }
+                ) {
+                    Text("حفظ التعديلات")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingReviewTarget = null }) {
+                    Text("إلغاء")
                 }
             }
         )
@@ -1946,19 +2104,40 @@ fun CategoryProvidersScreen(
                 }
             }
         } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(filteredList, key = { it.id ?: 0 }) { provider ->
-                    ProviderCardRow(
-                        provider = provider, 
-                        context = context,
-                        onClick = { activeProviderReviewsTarget = provider },
-                        onCallContact = { viewModel.incrementCallsCount() }
-                    )
+            if (layoutStyle == "grid") {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp)
+                ) {
+                    items(filteredList, key = { it.id ?: 0 }) { provider ->
+                        ProviderCardGridItem(
+                            provider = provider,
+                            context = context,
+                            onClick = { activeProviderReviewsTarget = provider },
+                            onCallContact = { viewModel.incrementCallsCount() }
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(filteredList, key = { it.id ?: 0 }) { provider ->
+                        ProviderCardRow(
+                            provider = provider, 
+                            context = context,
+                            onClick = { activeProviderReviewsTarget = provider },
+                            onCallContact = { viewModel.incrementCallsCount() }
+                        )
+                    }
                 }
             }
         }
@@ -2112,6 +2291,146 @@ fun ProviderCardRow(provider: ServiceProvider, context: Context, onClick: () -> 
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(28.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProviderCardGridItem(provider: ServiceProvider, context: Context, onClick: () -> Unit, onCallContact: () -> Unit) {
+    Card(
+        onClick = onClick,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("provider_grid_${provider.id}"),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Image Thumbnail Container
+            val hasImage = !provider.imageUrl.isNullOrBlank()
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (hasImage) {
+                    AsyncImage(
+                        model = provider.imageUrl,
+                        contentDescription = provider.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "افتراضي",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Details info
+            Text(
+                text = provider.name,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+            )
+            
+            Text(
+                text = provider.phone,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(vertical = 1.dp)
+            )
+
+            // Ratings Stars
+            Row(
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val fullStars = provider.rating.toInt()
+                repeat(5) { index ->
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "تقييم",
+                        tint = if (index < fullStars) MaterialTheme.colorScheme.secondary else Color.LightGray,
+                        modifier = Modifier.size(11.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                    "${provider.rating}",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Gray
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Action Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Call Button
+                Button(
+                    onClick = {
+                        try {
+                            onCallContact()
+                        } catch (e: Exception) {}
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${provider.phone}"))
+                        context.startActivity(intent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(28.dp)
+                ) {
+                    Text("اتصال", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+
+                // WhatsApp Button
+                Button(
+                    onClick = {
+                        try {
+                            onCallContact()
+                        } catch (e: Exception) {}
+                        val pureDigits = provider.phone.filter { it.isDigit() }
+                        val linkUrl = "https://api.whatsapp.com/send?phone=$pureDigits"
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(linkUrl))
+                        context.startActivity(intent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .weight(1f)
+                        .height(28.dp)
+                ) {
+                    Text("واتساب", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
@@ -2592,6 +2911,23 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
         }
     }
 
+    var logoUploadStatusMessage by remember { mutableStateOf("") }
+    val logoImageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            logoUploadStatusMessage = "جاري رفع الشعار المخصص..."
+            viewModel.uploadImageToFirebaseStorage(it, "app_logos") { downloadUrl ->
+                if (downloadUrl != null) {
+                    appLogoInput = downloadUrl
+                    logoUploadStatusMessage = "تم الرفع بنجاح!"
+                } else {
+                    logoUploadStatusMessage = "خطأ في رفع الشعار"
+                }
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2638,11 +2974,28 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
                 OutlinedTextField(
                     value = appLogoInput,
                     onValueChange = { appLogoInput = it },
-                    label = { Text("أيقونة/رمز التطبيق التعبيري (Emoji/Symbol)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    label = { Text("أيقونة/رمز التطبيق التعبيري (Emoji/Symbol) أو رابط الصورة للشعار", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                     textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (logoUploadStatusMessage.isNotEmpty()) {
+                        Text(logoUploadStatusMessage, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(end = 8.dp))
+                    }
+                    Button(
+                        onClick = { logoImageLauncher.launch("image/*") },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("رفع شعار من الاستوديو 🖼️", fontSize = 11.sp, color = Color.White)
+                    }
+                }
 
                 Button(
                     onClick = {
@@ -2803,7 +3156,9 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
                     Triple("red_black", "الهوية الملكية (أحمر وأسود 🔴🖤)", listOf(Color(0xFFE53935), Color(0xFF121212))),
                     Triple("slate_silver", "الحديثة الهادئة (فضي 🔵🩶)", listOf(Color(0xFF2196F3), Color(0xFFB0BEC5))),
                     Triple("emerald_green", "الواحة الخضراء (أخضر زاهي 🟢💚)", listOf(Color(0xFF2E7D32), Color(0xFFA5D6A7))),
-                    Triple("royal_indigo", "الغسق الكوني (بنفسجي وأزرق 🟣💙)", listOf(Color(0xFF673AB7), Color(0xFF42A5F5)))
+                    Triple("royal_indigo", "الغسق الكوني (بنفسجي وأزرق 🟣💙)", listOf(Color(0xFF673AB7), Color(0xFF42A5F5))),
+                    Triple("silver_metallic", "السمة الفضية اللامعة (فضي معدني 🩶⚙️)", listOf(Color(0xFF607D8B), Color(0xFFCFD8DC))),
+                    Triple("beige_cream", "السمة البيج الكلاسيكية (بيج وأبيض 🌾🍦)", listOf(Color(0xFF8D6E63), Color(0xFFF5F1EA)))
                 )
 
                 themeOptions.forEach { (themeId, label, swatches) ->
@@ -2855,6 +3210,119 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
                             }
                         )
                     }
+                }
+            }
+        }
+
+        // Service Providers Feed Layout & Sorting Configuration Card (Admin settings)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            val layoutStyle by viewModel.providersLayoutStyle.collectAsState()
+            val sortStyle by viewModel.providersSortStyle.collectAsState()
+
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = "تخصيص عرض وترتيب مقدمي الخدمات ⚙️",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "يسمح هذا الإعداد للادمن بتغيير وتثبيت طريقة العرض الافتراضية (شبكي أو قائمة) وترتيب مقدمي الخدمات بالصدارة لكافة المستخدمين.",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                // Layout Selector Row
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { viewModel.updateProvidersDisplayConfig("grid", sortStyle) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (layoutStyle == "grid") MaterialTheme.colorScheme.primary else Color.LightGray
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("أيقونات شبكية 🗳️", fontSize = 11.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.updateProvidersDisplayConfig("list", sortStyle) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (layoutStyle == "list") MaterialTheme.colorScheme.primary else Color.LightGray
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("قائمة متتالية 📃", fontSize = 11.sp)
+                        }
+                    }
+                    Text("طريقة عرض مقدمي الخدمات:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                // Sorting/Fronting Style Selector
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val sortStyleLabel = when (sortStyle) {
+                        "pinned_first" -> "المثبتون بالدبوس أولاً 📌"
+                        "highest_rating" -> "الأعلى تقييماً أولاً ⭐"
+                        else -> "الترتيب القياسي الافتراضي 🔄"
+                    }
+                    var sortDropdownExpanded by remember { mutableStateOf(false) }
+
+                    Box {
+                        Button(
+                            onClick = { sortDropdownExpanded = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(sortStyleLabel, fontSize = 11.sp, color = Color.White)
+                        }
+                        DropdownMenu(
+                            expanded = sortDropdownExpanded,
+                            onDismissRequest = { sortDropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("الترتيب القياسي الافتراضي 🔄", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                                onClick = {
+                                    viewModel.updateProvidersDisplayConfig(layoutStyle, "default")
+                                    sortDropdownExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("المثبتون بالدبوس أولاً 📌", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                                onClick = {
+                                    viewModel.updateProvidersDisplayConfig(layoutStyle, "pinned_first")
+                                    sortDropdownExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("الأعلى تقييماً أولاً ⭐", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                                onClick = {
+                                    viewModel.updateProvidersDisplayConfig(layoutStyle, "highest_rating")
+                                    sortDropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                    Text("آلية ترتيب صدارة النتائج:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -3372,7 +3840,7 @@ fun ProvidersManagementSubscreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             // Buttons
-                            Row {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = {
                                         item.id?.let { provId ->
@@ -3394,6 +3862,25 @@ fun ProvidersManagementSubscreen(
                                     modifier = Modifier.testTag("edit_provider_${item.id}")
                                 ) {
                                     Icon(Icons.Default.Edit, contentDescription = "تعديل", tint = MaterialTheme.colorScheme.secondary)
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        item.id?.let { provId ->
+                                            viewModel.toggleProviderPin(provId, item.isPinned) { ok ->
+                                                if (ok) {
+                                                    val msg = if (item.isPinned) "تم إلغاء تثبيت العميل" else "تم تثبيت العميل في الصدارة للجميع"
+                                                    Toast.makeText(context, "$msg بنجاح", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = if (item.isPinned) "📌" else "📍",
+                                        fontSize = 16.sp,
+                                        modifier = Modifier.alpha(if (item.isPinned) 1.0f else 0.4f)
+                                    )
                                 }
                             }
 
@@ -3424,6 +3911,7 @@ fun ProvidersManagementSubscreen(
         var ratingIn by remember { mutableStateOf(provTarget.rating.toString()) }
         var imageUrlIn by remember { mutableStateOf(provTarget.imageUrl ?: "") }
         var isActiveIn by remember { mutableStateOf(provTarget.isActive) }
+        var isPinnedIn by remember { mutableStateOf(provTarget.isPinned) }
         var latIn by remember { mutableStateOf(provTarget.lat?.toString() ?: "") }
         var lngIn by remember { mutableStateOf(provTarget.lng?.toString() ?: "") }
         var priceCategoryIn by remember { mutableStateOf(provTarget.priceCategory) }
@@ -3682,6 +4170,20 @@ fun ProvidersManagementSubscreen(
                             Text("هل مقدم الخدمة نشط ويعمل حالياً؟", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                         }
 
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Switch(
+                                checked = isPinnedIn,
+                                onCheckedChange = { isPinnedIn = it }
+                            )
+                            Text("تثبيت مقدم الخدمة في صدارة نواتج البحث؟ 📌", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
+
                         errorHint?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                         }
@@ -3710,7 +4212,8 @@ fun ProvidersManagementSubscreen(
                             lat = currentLat,
                             lng = currentLng,
                             priceCategory = priceCategoryIn,
-                            distanceCategory = distanceCategoryIn
+                            distanceCategory = distanceCategoryIn,
+                            isPinned = isPinnedIn
                         ) { ok ->
                             if (ok) {
                                 showUpsertProviderDialogTarget = null
@@ -3733,7 +4236,8 @@ fun ProvidersManagementSubscreen(
                                 lat = currentLat,
                                 lng = currentLng,
                                 priceCategory = priceCategoryIn,
-                                distanceCategory = distanceCategoryIn
+                                distanceCategory = distanceCategoryIn,
+                                isPinned = isPinnedIn
                             ) { ok ->
                                 if (ok) {
                                     showUpsertProviderDialogTarget = null

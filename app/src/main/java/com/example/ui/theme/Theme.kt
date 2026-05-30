@@ -49,6 +49,28 @@ private val DarkRoyalIndigoScheme = darkColorScheme(
     onSurface = Color.White
 )
 
+private val SilverMetallicScheme = darkColorScheme(
+    primary = Color(0xFF607D8B),       // Steel metallic gray
+    secondary = Color(0xFF78909C),     // Light slate metallic gray
+    background = Color(0xFFECEFF1),    // Light silver/white canvas
+    surface = Color(0xFFCFD8DC),       // Soft silver brushed surface
+    onPrimary = Color.White,
+    onSecondary = Color.Black,
+    onBackground = Color(0xFF263238),  // Dark slate text
+    onSurface = Color(0xFF37474F)      // Dark surface text
+)
+
+private val BeigeCreamScheme = darkColorScheme(
+    primary = Color(0xFF8D6E63),       // Warm luxury brown
+    secondary = Color(0xFFC7B198),     // Rich beige cream accent
+    background = Color(0xFFFDFBF7),    // Crisp warm rice white canvas
+    surface = Color(0xFFF4EFE6),       // Soft beige milk tea surface
+    onPrimary = Color.White,
+    onSecondary = Color.Black,
+    onBackground = Color(0xFF3E2723),  // Espresso coffee text
+    onSurface = Color(0xFF4E342E)      // Warm chocolate text
+)
+
 @Composable
 fun MyApplicationTheme(
     themeChoice: String = "red_black",
@@ -59,6 +81,8 @@ fun MyApplicationTheme(
         "slate_silver" -> DarkModernSlateScheme
         "emerald_green" -> DarkEmeraldScheme
         "royal_indigo" -> DarkRoyalIndigoScheme
+        "silver_metallic" -> SilverMetallicScheme
+        "beige_cream" -> BeigeCreamScheme
         else -> DarkRedBlackScheme
     }
 

@@ -45,7 +45,8 @@ data class ServiceProvider(
     @Json(name = "lat") val lat: Double? = null,
     @Json(name = "lng") val lng: Double? = null,
     @Json(name = "price_category") val priceCategory: String = "medium", // "low", "medium", "high"
-    @Json(name = "distance_category") val distanceCategory: String = "medium" // "near", "medium", "far"
+    @Json(name = "distance_category") val distanceCategory: String = "medium", // "near", "medium", "far"
+    @Json(name = "is_pinned") val isPinned: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)

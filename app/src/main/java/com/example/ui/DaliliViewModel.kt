@@ -69,6 +69,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _customAppLogo = MutableStateFlow(sharedPrefs.getString("custom_app_logo", "📡") ?: "📡")
     val customAppLogo = _customAppLogo.asStateFlow()
 
+    private val _providersLayoutStyle = MutableStateFlow(sharedPrefs.getString("providers_layout_style", "list") ?: "list")
+    val providersLayoutStyle = _providersLayoutStyle.asStateFlow()
+
+    private val _providersSortStyle = MutableStateFlow(sharedPrefs.getString("providers_sort_style", "default") ?: "default")
+    val providersSortStyle = _providersSortStyle.asStateFlow()
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
 
@@ -148,12 +154,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     val welcomeImage = snapshot.getString("welcome_image") ?: "📡"
                     val welcomeSize = snapshot.getLong("welcome_size")?.toInt() ?: 13
                     val themeChoice = snapshot.getString("theme_choice") ?: "red_black"
+                    val layoutStyle = snapshot.getString("providers_layout_style") ?: "list"
+                    val sortStyle = snapshot.getString("providers_sort_style") ?: "default"
 
                     _customAppName.value = appName
                     _customAppLogo.value = appLogo
                     _welcomeText.value = welcomeText
                     _welcomeImage.value = welcomeImage
                     _welcomeSize.value = welcomeSize
+                    _providersLayoutStyle.value = layoutStyle
+                    _providersSortStyle.value = sortStyle
                     
                     if (_currentTheme.value != themeChoice) {
                         _currentTheme.value = themeChoice
@@ -166,6 +176,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         .putString("welcome_image", welcomeImage)
                         .putInt("welcome_size", welcomeSize)
                         .putString("app_theme_choice", themeChoice)
+                        .putString("providers_layout_style", layoutStyle)
+                        .putString("providers_sort_style", sortStyle)
                         .apply()
                 } else {
                     seedDefaultAppConfig()
@@ -258,6 +270,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                                 val lng = doc.getDouble("lng")
                                 val priceCategory = doc.getString("price_category") ?: doc.getString("priceCategory") ?: "medium"
                                 val distanceCategory = doc.getString("distance_category") ?: doc.getString("distanceCategory") ?: "medium"
+                                val isPinned = doc.getBoolean("is_pinned") ?: doc.getBoolean("isPinned") ?: false
                                 ServiceProvider(
                                     id = idLong.toInt(),
                                     name = name,
@@ -271,7 +284,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                                     lat = lat,
                                     lng = lng,
                                     priceCategory = priceCategory,
-                                    distanceCategory = distanceCategory
+                                    distanceCategory = distanceCategory,
+                                    isPinned = isPinned
                                 )
                             } catch (e: Exception) {
                                 Log.e("DaliliViewModel", "Error parsing provider: ${doc.id}", e)
@@ -824,6 +838,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         lng: Double? = null,
         priceCategory: String = "medium",
         distanceCategory: String = "medium",
+        isPinned: Boolean = false,
         onComplete: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
@@ -840,7 +855,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     "is_active" to isActive,
                     "created_at" to System.currentTimeMillis().toString(),
                     "price_category" to priceCategory,
-                    "distance_category" to distanceCategory
+                    "distance_category" to distanceCategory,
+                    "is_pinned" to isPinned
                 )
                 if (subCategoryId != null) {
                     data["sub_category_id"] = subCategoryId
@@ -889,6 +905,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         lng: Double? = null,
         priceCategory: String = "medium",
         distanceCategory: String = "medium",
+        isPinned: Boolean = false,
         onComplete: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
@@ -905,7 +922,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     "lat" to lat,
                     "lng" to lng,
                     "price_category" to priceCategory,
-                    "distance_category" to distanceCategory
+                    "distance_category" to distanceCategory,
+                    "is_pinned" to isPinned
                 )
 
                 db.collection("service_providers").document(providerId.toString()).set(data, com.google.firebase.firestore.SetOptions.merge())
@@ -932,6 +950,59 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete provider failed", e)
+                _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
+            }
+        }
+    }
+
+    fun toggleProviderPin(providerId: Int, currentPinned: Boolean, onComplete: (Boolean) -> Unit = {}) {
+        db.collection("service_providers").document(providerId.toString())
+            .set(mapOf("is_pinned" to !currentPinned), com.google.firebase.firestore.SetOptions.merge())
+            .addOnCompleteListener { task ->
+                handlerSuccessOnMain { onComplete(task.isSuccessful) }
+            }
+    }
+
+    fun updateProvidersDisplayConfig(layout: String, sort: String) {
+        val data = mapOf(
+            "providers_layout_style" to layout,
+            "providers_sort_style" to sort
+        )
+        db.collection("app_config").document("global")
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    sharedPrefs.edit()
+                        .putString("providers_layout_style", layout)
+                        .putString("providers_sort_style", sort)
+                        .apply()
+                    _providersLayoutStyle.value = layout
+                    _providersSortStyle.value = sort
+                }
+            }
+    }
+
+    fun updateReview(reviewId: Int, userName: String, comment: String, rating: Double, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val reviewTarget = _reviews.value.firstOrNull { it.id == reviewId }
+                val data = mapOf(
+                    "user_name" to userName,
+                    "comment" to comment,
+                    "rating" to rating
+                )
+                db.collection("reviews").document(reviewId.toString()).set(data, com.google.firebase.firestore.SetOptions.merge())
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        if (task.isSuccessful && reviewTarget != null) {
+                            recalculateAndSaveProviderRating(reviewTarget.providerId)
+                        }
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Update review error", e)
                 _isLoading.value = false
                 handlerSuccessOnMain { onComplete(false) }
             }
