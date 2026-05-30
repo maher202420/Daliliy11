@@ -7,9 +7,6 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import com.google.firebase.storage.FirebaseStorage
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.example.utils.NotificationHelper
@@ -30,10 +27,21 @@ import java.security.MessageDigest
 class DaliliViewModel(application: Application) : AndroidViewModel(application) {
 
     private val sharedPrefs = application.getSharedPreferences("dalili_prefs", Context.MODE_PRIVATE)
-    private val firestore = FirebaseFirestore.getInstance()
 
     private val _categories = MutableStateFlow<List<Category>>(emptyList())
     val categories = _categories.asStateFlow()
+
+    private val _subCategories = MutableStateFlow<List<SubCategory>>(emptyList())
+    val subCategories = _subCategories.asStateFlow()
+
+    private val _welcomeText = MutableStateFlow(sharedPrefs.getString("welcome_text", "المساعد الفوري للوصول إلى الخدمات ومقدمي الخدمات المحليين بلحظة واحدة.") ?: "المساعد الفوري للوصول إلى الخدمات ومقدمي الخدمات المحليين بلحظة واحدة.")
+    val welcomeText = _welcomeText.asStateFlow()
+
+    private val _welcomeImage = MutableStateFlow(sharedPrefs.getString("welcome_image", "📡") ?: "📡")
+    val welcomeImage = _welcomeImage.asStateFlow()
+
+    private val _welcomeSize = MutableStateFlow(sharedPrefs.getInt("welcome_size", 13))
+    val welcomeSize = _welcomeSize.asStateFlow()
 
     private val _serviceProviders = MutableStateFlow<List<ServiceProvider>>(emptyList())
     val serviceProviders = _serviceProviders.asStateFlow()
@@ -65,7 +73,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage = _errorMessage.asStateFlow()
 
-    private val _isCloudConnected = MutableStateFlow(true)
+    private val _isCloudConnected = MutableStateFlow(false)
     val isCloudConnected = _isCloudConnected.asStateFlow()
 
     private val _supportPhone = MutableStateFlow("777644670")
@@ -101,6 +109,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _isArabic = MutableStateFlow(sharedPrefs.getBoolean("app_lang_ar", true))
     val isArabic = _isArabic.asStateFlow()
 
+    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+
     init {
         // Recover logged in user session if present
         val savedUsername = sharedPrefs.getString("saved_username", null)
@@ -113,265 +123,127 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        // Start Firebase Realtime listeners
-        startListeningFirebase()
+        // Load local persistent cache instead of Firebase Realtime listeners
+        loadLocalData()
     }
 
-    private fun startListeningFirebase() {
-        // 1. Categories Listener
-        firestore.collection("categories")
-            .orderBy("order_index", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("DaliliViewModel", "Listen categories failed", error)
-                    _isCloudConnected.value = false
-                    return@addSnapshotListener
-                }
-                _isCloudConnected.value = true
-                if (snapshot != null) {
-                    val list = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
-                            val nameAr = doc.getString("name_ar") ?: ""
-                            val icon = doc.getString("icon") ?: "📁"
-                            val orderIndex = doc.getLong("order_index")?.toInt() ?: 0
-                            Category(id = id, nameAr = nameAr, icon = icon, orderIndex = orderIndex)
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    if (list.isEmpty()) {
-                        _categories.value = getDefaultCategories()
-                        autoPopulateDefaultCategories()
-                    } else {
-                        _categories.value = list
-                    }
-                }
+    private fun loadLocalData() {
+        try {
+            // Load Settings from shared preferences (or use defaults)
+            _supportPhone.value = sharedPrefs.getString("support_phone", "777644670") ?: "777644670"
+            _supportEmail.value = sharedPrefs.getString("support_email", "support@dalili.com") ?: "support@dalili.com"
+            _supportWhatsapp.value = sharedPrefs.getString("support_whatsapp", "777644670") ?: "777644670"
+            _footerText.value = sharedPrefs.getString("footer_text", "MAW 777644670") ?: "MAW 777644670"
+            _showFooter.value = sharedPrefs.getBoolean("show_footer", true)
+            _userLaunches.value = sharedPrefs.getInt("user_launches", 0)
+            _callsCount.value = sharedPrefs.getInt("calls_count", 0)
+
+            // 1. Categories
+            val categoriesJson = sharedPrefs.getString("local_categories", null)
+            if (categoriesJson != null) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Category::class.java)
+                _categories.value = moshi.adapter<List<Category>>(listType).fromJson(categoriesJson) ?: getDefaultCategories()
+            } else {
+                _categories.value = getDefaultCategories()
+                saveCategories()
             }
 
-        // 2. Service Providers Listener
-        firestore.collection("service_providers")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("DaliliViewModel", "Listen providers failed", error)
-                    return@addSnapshotListener
-                }
-                if (snapshot != null) {
-                    val list = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
-                            val name = doc.getString("name") ?: ""
-                            val phone = doc.getString("phone") ?: ""
-                            val categoryId = doc.getLong("category_id")?.toInt() ?: 0
-                            val rating = doc.getDouble("rating") ?: 5.0
-                            val imageUrl = doc.getString("image_url")
-                            val isActive = doc.getBoolean("is_active") ?: true
-                            val lat = doc.getDouble("lat")
-                            val lng = doc.getDouble("lng")
-                            val priceCategory = doc.getString("price_category") ?: "medium"
-                            val distanceCategory = doc.getString("distance_category") ?: "medium"
-                            ServiceProvider(
-                                id = id,
-                                name = name,
-                                phone = phone,
-                                categoryId = categoryId,
-                                rating = rating,
-                                imageUrl = imageUrl,
-                                isActive = isActive,
-                                lat = lat,
-                                lng = lng,
-                                priceCategory = priceCategory,
-                                distanceCategory = distanceCategory
-                            )
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    if (list.isEmpty()) {
-                        _serviceProviders.value = getDefaultProviders()
-                        autoPopulateDefaultProviders()
-                    } else {
-                        _serviceProviders.value = list
-                    }
-                }
+            // 1.5. Subcategories
+            val subCategoriesJson = sharedPrefs.getString("local_subcategories", null)
+            if (subCategoriesJson != null) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, SubCategory::class.java)
+                _subCategories.value = moshi.adapter<List<SubCategory>>(listType).fromJson(subCategoriesJson) ?: getDefaultSubCategories()
+            } else {
+                _subCategories.value = getDefaultSubCategories()
+                saveSubCategories()
             }
 
-        // 3. Reviews Listener
-        firestore.collection("reviews")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                if (snapshot != null) {
-                    val list = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
-                            val providerId = doc.getLong("provider_id")?.toInt() ?: 0
-                            val userName = doc.getString("user_name") ?: ""
-                            val comment = doc.getString("comment") ?: ""
-                            val rating = doc.getDouble("rating") ?: 5.0
-                            val createdAt = doc.getString("created_at")
-                            Review(id = id, providerId = providerId, userName = userName, comment = comment, rating = rating, createdAt = createdAt)
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    if (list.isEmpty()) {
-                        _reviews.value = getDefaultReviews()
-                        autoPopulateDefaultReviews()
-                    } else {
-                        _reviews.value = list
-                    }
-                }
+            // 2. Service Providers
+            val providersJson = sharedPrefs.getString("local_service_providers", null)
+            if (providersJson != null) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, ServiceProvider::class.java)
+                _serviceProviders.value = moshi.adapter<List<ServiceProvider>>(listType).fromJson(providersJson) ?: getDefaultProviders()
+            } else {
+                _serviceProviders.value = getDefaultProviders()
+                saveServiceProviders()
             }
 
-        // 4. Admins Listener
-        firestore.collection("admins")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                if (snapshot != null) {
-                    val list = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = doc.getLong("id")?.toInt() ?: doc.id.toIntOrNull() ?: doc.id.hashCode()
-                            val username = doc.getString("username") ?: ""
-                            val passwordHash = doc.getString("password_hash") ?: ""
-                            val role = doc.getString("role") ?: "admin"
-                            val createdAt = doc.getString("created_at")
-                            Admin(id = id, username = username, passwordHash = passwordHash, role = role, createdAt = createdAt)
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    if (list.isEmpty()) {
-                        autoPopulateDefaultAdmins()
-                    } else {
-                        _admins.value = list
-                    }
-                }
+            // 3. Reviews
+            val reviewsJson = sharedPrefs.getString("local_reviews", null)
+            if (reviewsJson != null) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Review::class.java)
+                _reviews.value = moshi.adapter<List<Review>>(listType).fromJson(reviewsJson) ?: getDefaultReviews()
+            } else {
+                _reviews.value = getDefaultReviews()
+                saveReviews()
             }
 
-        // 5. Pending Providers Listener
-        firestore.collection("pending_providers")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) return@addSnapshotListener
-                if (snapshot != null) {
-                    val list = snapshot.documents.mapNotNull { doc ->
-                        try {
-                            val id = doc.id
-                            val name = doc.getString("name") ?: ""
-                            val phone = doc.getString("phone") ?: ""
-                            val categoryId = doc.getLong("category_id")?.toInt() ?: 0
-                            val region = doc.getString("region") ?: ""
-                            val imageUrl = doc.getString("image_url")
-                            val status = doc.getString("status") ?: "pending"
-                            val createdAt = doc.getString("created_at")
-                            PendingProvider(id = id, name = name, phone = phone, categoryId = categoryId, region = region, imageUrl = imageUrl, status = status, createdAt = createdAt)
-                        } catch (e: Exception) {
-                            null
-                        }
-                    }
-                    _pendingProviders.value = list
-                }
+            // 4. Admins
+            val adminsJson = sharedPrefs.getString("local_admins", null)
+            if (adminsJson != null) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
+                _admins.value = moshi.adapter<List<Admin>>(listType).fromJson(adminsJson) ?: emptyList()
+            }
+            if (_admins.value.isEmpty()) {
+                val defaultAdmin = Admin(
+                    id = 1,
+                    username = "admin",
+                    passwordHash = "maher736462",
+                    role = "super_admin",
+                    createdAt = System.currentTimeMillis().toString()
+                )
+                _admins.value = listOf(defaultAdmin)
+                saveAdmins()
             }
 
-        // 6. System Settings Listener
-        firestore.collection("settings").document("app_config")
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null && snapshot.exists()) {
-                    _supportPhone.value = snapshot.getString("support_phone") ?: "777644670"
-                    _supportEmail.value = snapshot.getString("support_email") ?: "support@dalili.com"
-                    _supportWhatsapp.value = snapshot.getString("support_whatsapp") ?: "777644670"
-                    _footerText.value = snapshot.getString("footer_text") ?: "MAW 777644670"
-                    _showFooter.value = snapshot.getBoolean("show_footer") ?: true
-                } else {
-                    val initData = mapOf(
-                        "support_phone" to "777644670",
-                        "support_email" to "support@dalili.com",
-                        "support_whatsapp" to "777644670",
-                        "footer_text" to "MAW 777644670",
-                        "show_footer" to true
-                    )
-                    firestore.collection("settings").document("app_config").set(initData)
-                }
+            // 5. Pending Providers
+            val pendingJson = sharedPrefs.getString("local_pending_providers", null)
+            if (pendingJson != null) {
+                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, PendingProvider::class.java)
+                _pendingProviders.value = moshi.adapter<List<PendingProvider>>(listType).fromJson(pendingJson) ?: emptyList()
+            } else {
+                _pendingProviders.value = emptyList()
+                savePendingProviders()
             }
-
-        // 7. App Stats Listener
-        firestore.collection("stats").document("app_usage")
-            .addSnapshotListener { snapshot, _ ->
-                if (snapshot != null && snapshot.exists()) {
-                    _userLaunches.value = snapshot.getLong("user_launches")?.toInt() ?: 0
-                    _callsCount.value = snapshot.getLong("calls_count")?.toInt() ?: 0
-                } else {
-                    val initStats = mapOf(
-                        "user_launches" to 0,
-                        "calls_count" to 0
-                    )
-                    firestore.collection("stats").document("app_usage").set(initStats)
-                }
-            }
-    }
-
-    // Auto-population functions
-    private fun autoPopulateDefaultCategories() {
-        val defaults = getDefaultCategories()
-        for (cat in defaults) {
-            val data = mapOf(
-                "id" to cat.id,
-                "name_ar" to cat.nameAr,
-                "icon" to cat.icon,
-                "order_index" to cat.orderIndex,
-                "created_at" to System.currentTimeMillis().toString()
-            )
-            firestore.collection("categories").document(cat.id.toString()).set(data)
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Failed to load local data", e)
         }
     }
 
-    private fun autoPopulateDefaultProviders() {
-        val defaults = getDefaultProviders()
-        for (p in defaults) {
-            val data = mapOf(
-                "id" to p.id,
-                "name" to p.name,
-                "phone" to p.phone,
-                "category_id" to p.categoryId,
-                "rating" to p.rating,
-                "image_url" to p.imageUrl,
-                "is_active" to p.isActive,
-                "created_at" to System.currentTimeMillis().toString()
-            )
-            firestore.collection("service_providers").document(p.id.toString()).set(data)
-        }
+    private fun saveCategories() {
+        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Category::class.java)
+        val json = moshi.adapter<List<Category>>(listType).toJson(_categories.value)
+        sharedPrefs.edit().putString("local_categories", json).apply()
     }
 
-    private fun autoPopulateDefaultReviews() {
-        val defaults = getDefaultReviews()
-        for (rev in defaults) {
-            val data = mapOf(
-                "id" to rev.id,
-                "provider_id" to rev.providerId,
-                "user_name" to rev.userName,
-                "comment" to rev.comment,
-                "rating" to rev.rating,
-                "created_at" to rev.createdAt
-            )
-            firestore.collection("reviews").document(rev.id.toString()).set(data)
-        }
+    private fun saveSubCategories() {
+        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, SubCategory::class.java)
+        val json = moshi.adapter<List<SubCategory>>(listType).toJson(_subCategories.value)
+        sharedPrefs.edit().putString("local_subcategories", json).apply()
     }
 
-    private fun autoPopulateDefaultAdmins() {
-        val superAdmin = Admin(
-            id = 1,
-            username = "admin",
-            passwordHash = "maher736462", // can be checked literally as requested
-            role = "super_admin",
-            createdAt = System.currentTimeMillis().toString()
-        )
-        val data = mapOf(
-            "id" to superAdmin.id,
-            "username" to superAdmin.username,
-            "password_hash" to superAdmin.passwordHash,
-            "role" to superAdmin.role,
-            "created_at" to superAdmin.createdAt
-        )
-        firestore.collection("admins").document("1").set(data)
+    private fun saveServiceProviders() {
+        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, ServiceProvider::class.java)
+        val json = moshi.adapter<List<ServiceProvider>>(listType).toJson(_serviceProviders.value)
+        sharedPrefs.edit().putString("local_service_providers", json).apply()
+    }
+
+    private fun saveReviews() {
+        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Review::class.java)
+        val json = moshi.adapter<List<Review>>(listType).toJson(_reviews.value)
+        sharedPrefs.edit().putString("local_reviews", json).apply()
+    }
+
+    private fun saveAdmins() {
+        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
+        val json = moshi.adapter<List<Admin>>(listType).toJson(_admins.value)
+        sharedPrefs.edit().putString("local_admins", json).apply()
+    }
+
+    private fun savePendingProviders() {
+        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, PendingProvider::class.java)
+        val json = moshi.adapter<List<PendingProvider>>(listType).toJson(_pendingProviders.value)
+        sharedPrefs.edit().putString("local_pending_providers", json).apply()
     }
 
     // SHARED PREFERENCES THEME & LANGUAGE CONFIG
@@ -396,7 +268,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun refreshAll() {
-        startListeningFirebase()
+        loadLocalData()
     }
 
     fun clearError() {
@@ -504,15 +376,11 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     role = "admin",
                     createdAt = System.currentTimeMillis().toString()
                 )
-
-                firestore.collection("admins").document(newId.toString())
-                    .set(newAdmin)
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _admins.value.toMutableList()
+                list.add(newAdmin)
+                _admins.value = list
+                saveAdmins()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add admin failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -527,14 +395,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _isLoading.value = true
             try {
                 val hashed = hashPasswordHelper(newPasswordInput)
-                firestore.collection("admins").document(adminId.toString())
-                    .update("password_hash", hashed)
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
+                val list = _admins.value.map { admin ->
+                    if (admin.id == adminId) {
+                        admin.copy(passwordHash = hashed)
+                    } else {
+                        admin
                     }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                }
+                _admins.value = list
+                saveAdmins()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Change pass failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -548,14 +418,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                firestore.collection("admins").document(adminId.toString())
-                    .delete()
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _admins.value.filter { it.id != adminId }
+                _admins.value = list
+                saveAdmins()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete admin failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -578,16 +444,13 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     rating = rating,
                     createdAt = System.currentTimeMillis().toString()
                 )
+                val list = _reviews.value.toMutableList()
+                list.add(review)
+                _reviews.value = list
+                saveReviews()
 
-                firestore.collection("reviews").document(nextId.toString())
-                    .set(review)
-                    .addOnSuccessListener {
-                        recalculateAndSaveProviderRating(providerId)
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                recalculateAndSaveProviderRating(providerId)
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add review error", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -600,17 +463,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _isLoading.value = true
             try {
                 val reviewTarget = _reviews.value.firstOrNull { it.id == reviewId }
-                firestore.collection("reviews").document(reviewId.toString())
-                    .delete()
-                    .addOnSuccessListener {
-                        if (reviewTarget != null) {
-                            recalculateAndSaveProviderRating(reviewTarget.providerId)
-                        }
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _reviews.value.filter { it.id != reviewId }
+                _reviews.value = list
+                saveReviews()
+
+                if (reviewTarget != null) {
+                    recalculateAndSaveProviderRating(reviewTarget.providerId)
+                }
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete review error", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -629,8 +489,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             String.format("%.1f", avg).toDoubleOrNull() ?: 5.0
         }
 
-        firestore.collection("service_providers").document(providerId.toString())
-            .update("rating", finalRating)
+        val list = _serviceProviders.value.map { provider ->
+            if (provider.id == providerId) {
+                provider.copy(rating = finalRating)
+            } else {
+                provider
+            }
+        }
+        _serviceProviders.value = list
+        saveServiceProviders()
     }
 
     // MANAGE CATEGORIES (Admins and Super Admins)
@@ -646,15 +513,11 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     orderIndex = orderIndex,
                     createdAt = System.currentTimeMillis().toString()
                 )
-
-                firestore.collection("categories").document(nextId.toString())
-                    .set(category)
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _categories.value.toMutableList()
+                list.add(category)
+                _categories.value = list
+                saveCategories()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -668,19 +531,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val updates = mapOf(
-                    "name_ar" to nameAr,
-                    "icon" to icon,
-                    "order_index" to orderIndex
-                )
-                firestore.collection("categories").document(categoryId.toString())
-                    .update(updates)
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
+                val list = _categories.value.map { cat ->
+                    if (cat.id == categoryId) {
+                        cat.copy(nameAr = nameAr, icon = icon, orderIndex = orderIndex)
+                    } else {
+                        cat
                     }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                }
+                _categories.value = list
+                saveCategories()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -694,14 +554,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                firestore.collection("categories").document(categoryId.toString())
-                    .delete()
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _categories.value.filter { it.id != categoryId }
+                _categories.value = list
+                saveCategories()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete category failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -716,6 +572,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         name: String, 
         phone: String, 
         categoryId: Int, 
+        subCategoryId: Int? = null,
         rating: Double, 
         imageUrl: String, 
         isActive: Boolean, 
@@ -734,6 +591,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     name = name,
                     phone = phone,
                     categoryId = categoryId,
+                    subCategoryId = subCategoryId,
                     rating = rating,
                     imageUrl = imageUrl,
                     isActive = isActive,
@@ -744,23 +602,21 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     distanceCategory = distanceCategory
                 )
 
-                firestore.collection("service_providers").document(nextId.toString())
-                    .set(provider)
-                    .addOnSuccessListener {
-                        try {
-                            NotificationHelper.scheduleNotification(
-                                getApplication(),
-                                "تم إضافة خدمة جديدة! 🎉",
-                                "تم إضافة مقدم الخدمة: $name بنجاح!"
-                            )
-                        } catch (e: Exception) {
-                            Log.e("DaliliViewModel", "Notification scheduling failed", e)
-                        }
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _serviceProviders.value.toMutableList()
+                list.add(provider)
+                _serviceProviders.value = list
+                saveServiceProviders()
+
+                try {
+                    NotificationHelper.scheduleNotification(
+                        getApplication(),
+                        "تم إضافة خدمة جديدة! 🎉",
+                        "تم إضافة مقدم الخدمة: $name بنجاح!"
+                    )
+                } catch (e: Exception) {
+                    Log.e("DaliliViewModel", "Notification scheduling failed", e)
+                }
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add service provider fail", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -775,6 +631,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         name: String,
         phone: String,
         categoryId: Int,
+        subCategoryId: Int? = null,
         rating: Double,
         imageUrl: String?,
         isActive: Boolean,
@@ -787,27 +644,28 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                val updates = mapOf(
-                    "name" to name,
-                    "phone" to phone,
-                    "category_id" to categoryId,
-                    "rating" to rating,
-                    "image_url" to imageUrl,
-                    "is_active" to isActive,
-                    "lat" to lat,
-                    "lng" to lng,
-                    "price_category" to priceCategory,
-                    "distance_category" to distanceCategory
-                )
-
-                firestore.collection("service_providers").document(providerId.toString())
-                    .update(updates)
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
+                val list = _serviceProviders.value.map { provider ->
+                    if (provider.id == providerId) {
+                        provider.copy(
+                            name = name,
+                            phone = phone,
+                            categoryId = categoryId,
+                            subCategoryId = subCategoryId,
+                            rating = rating,
+                            imageUrl = imageUrl,
+                            isActive = isActive,
+                            lat = lat,
+                            lng = lng,
+                            priceCategory = priceCategory,
+                            distanceCategory = distanceCategory
+                        )
+                    } else {
+                        provider
                     }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                }
+                _serviceProviders.value = list
+                saveServiceProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update provider failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -821,14 +679,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             _isLoading.value = true
             try {
-                firestore.collection("service_providers").document(providerId.toString())
-                    .delete()
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _serviceProviders.value.filter { it.id != providerId }
+                _serviceProviders.value = list
+                saveServiceProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete provider failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -842,7 +696,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun addPendingProvider(name: String, phone: String, categoryId: Int, region: String, imageUrl: String?, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val id = firestore.collection("pending_providers").document().id
+                val id = java.util.UUID.randomUUID().toString()
                 val pending = PendingProvider(
                     id = id,
                     name = name,
@@ -854,14 +708,11 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     createdAt = System.currentTimeMillis().toString()
                 )
 
-                firestore.collection("pending_providers").document(id)
-                    .set(pending)
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val list = _pendingProviders.value.toMutableList()
+                list.add(pending)
+                _pendingProviders.value = list
+                savePendingProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add pending provider fail", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -884,31 +735,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     createdAt = System.currentTimeMillis().toString()
                 )
 
-                firestore.collection("service_providers").document(nextId.toString())
-                    .set(provider)
-                    .addOnSuccessListener {
-                        try {
-                            NotificationHelper.scheduleNotification(
-                                getApplication(),
-                                "تهانينا! تم تفعيل حسابك 🏆",
-                                "مرحباً بك ${pending.name}، تم الموافقة على انضمامك كمهني!"
-                            )
-                        } catch (e: Exception) {
-                            Log.e("DaliliViewModel", "Approval notification failed", e)
-                        }
+                val providersList = _serviceProviders.value.toMutableList()
+                providersList.add(provider)
+                _serviceProviders.value = providersList
+                saveServiceProviders()
 
-                        if (pending.id != null) {
-                            firestore.collection("pending_providers").document(pending.id)
-                                .delete()
-                                .addOnSuccessListener { handlerSuccessOnMain { onComplete(true) } }
-                                .addOnFailureListener { handlerSuccessOnMain { onComplete(true) } }
-                        } else {
-                            handlerSuccessOnMain { onComplete(true) }
-                        }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                try {
+                    NotificationHelper.scheduleNotification(
+                        getApplication(),
+                        "تهانينا! تم تفعيل حسابك 🏆",
+                        "مرحباً بك ${pending.name}، تم الموافقة على انضمامك كمهني!"
+                    )
+                } catch (e: Exception) {
+                    Log.e("DaliliViewModel", "Approval notification failed", e)
+                }
+
+                if (pending.id != null) {
+                    val pendingList = _pendingProviders.value.filter { it.id != pending.id }
+                    _pendingProviders.value = pendingList
+                    savePendingProviders()
+                }
+                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Approve pending failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -919,14 +766,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun rejectPendingProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             if (pending.id != null) {
-                firestore.collection("pending_providers").document(pending.id)
-                    .delete()
-                    .addOnSuccessListener {
-                        handlerSuccessOnMain { onComplete(true) }
-                    }
-                    .addOnFailureListener {
-                        handlerSuccessOnMain { onComplete(false) }
-                    }
+                val pendingList = _pendingProviders.value.filter { it.id != pending.id }
+                _pendingProviders.value = pendingList
+                savePendingProviders()
+                handlerSuccessOnMain { onComplete(true) }
             } else {
                 handlerSuccessOnMain { onComplete(false) }
             }
@@ -944,82 +787,38 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateSystemConfig(phone: String, email: String, whatsapp: String, footer: String, showF: Boolean, onComplete: (Boolean) -> Unit = {}) {
-        val data = mapOf(
-            "support_phone" to phone,
-            "support_email" to email,
-            "support_whatsapp" to whatsapp,
-            "footer_text" to footer,
-            "show_footer" to showF
-        )
-        firestore.collection("settings").document("app_config")
-            .set(data)
-            .addOnSuccessListener { onComplete(true) }
-            .addOnFailureListener { onComplete(false) }
+        sharedPrefs.edit()
+            .putString("support_phone", phone)
+            .putString("support_email", email)
+            .putString("support_whatsapp", whatsapp)
+            .putString("footer_text", footer)
+            .putBoolean("show_footer", showF)
+            .apply()
+
+        _supportPhone.value = phone
+        _supportEmail.value = email
+        _supportWhatsapp.value = whatsapp
+        _footerText.value = footer
+        _showFooter.value = showF
+
+        onComplete(true)
     }
 
     fun incrementUserLaunches() {
-        val docRef = firestore.collection("stats").document("app_usage")
-        firestore.runTransaction { transaction ->
-            val snapshot = transaction.get(docRef)
-            val currentLaunches = snapshot.getLong("user_launches") ?: 0
-            val currentCalls = snapshot.getLong("calls_count") ?: 0
-            transaction.set(docRef, mapOf(
-                "user_launches" to currentLaunches + 1,
-                "calls_count" to currentCalls
-            ))
-            null
-        }.addOnFailureListener {
-            firestore.collection("stats").document("app_usage").set(mapOf(
-                "user_launches" to 1,
-                "calls_count" to 0
-            ))
-        }
+        val next = _userLaunches.value + 1
+        sharedPrefs.edit().putInt("user_launches", next).apply()
+        _userLaunches.value = next
     }
 
     fun incrementCallsCount() {
-        val docRef = firestore.collection("stats").document("app_usage")
-        firestore.runTransaction { transaction ->
-            val snapshot = transaction.get(docRef)
-            val currentLaunches = snapshot.getLong("user_launches") ?: 0
-            val currentCalls = snapshot.getLong("calls_count") ?: 0
-            transaction.set(docRef, mapOf(
-                "user_launches" to currentLaunches,
-                "calls_count" to currentCalls + 1
-            ))
-            null
-        }.addOnFailureListener {
-            firestore.collection("stats").document("app_usage").set(mapOf(
-                "user_launches" to 1,
-                "calls_count" to 1
-            ))
-        }
+        val next = _callsCount.value + 1
+        sharedPrefs.edit().putInt("calls_count", next).apply()
+        _callsCount.value = next
     }
 
     // IMAGE FILE UPLOAD
     fun uploadImageToFirebaseStorage(uri: Uri, folder: String, onComplete: (String?) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val storageRef = FirebaseStorage.getInstance().reference
-                val fileName = "${System.currentTimeMillis()}_${uri.lastPathSegment ?: "image"}.jpg"
-                val fileRef = storageRef.child("$folder/$fileName")
-
-                fileRef.putFile(uri)
-                    .addOnSuccessListener {
-                        fileRef.downloadUrl.addOnSuccessListener { downloadUri ->
-                            onComplete(downloadUri.toString())
-                        }.addOnFailureListener {
-                            onComplete(null)
-                        }
-                    }
-                    .addOnFailureListener {
-                        Log.e("DaliliViewModel", "Image upload failed to Storage", it)
-                        onComplete(null)
-                    }
-            } catch (e: Exception) {
-                Log.e("DaliliViewModel", "Storage upload catch", e)
-                onComplete(null)
-            }
-        }
+        onComplete(uri.toString())
     }
 
     // SMART ASSISTANT METHODS
@@ -1252,5 +1051,58 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         } catch (e: Exception) {
             password
         }
+    }
+
+    private fun getDefaultSubCategories(): List<SubCategory> {
+        return listOf(
+            SubCategory(id = 5001, parentCategoryId = 1003, nameAr = "عيادات العظام", icon = "🦴", orderIndex = 1),
+            SubCategory(id = 5002, parentCategoryId = 1003, nameAr = "عيادات العيون", icon = "👁️", orderIndex = 2),
+            SubCategory(id = 5003, parentCategoryId = 1003, nameAr = "الجراحة العامة", icon = "✂️", orderIndex = 3),
+            SubCategory(id = 5004, parentCategoryId = 1003, nameAr = "تمريض منزلي", icon = "🩹", orderIndex = 4),
+            SubCategory(id = 5005, parentCategoryId = 1002, nameAr = "كهرباء منزلي", icon = "🔌", orderIndex = 1),
+            SubCategory(id = 5006, parentCategoryId = 1002, nameAr = "أعمال السباكة", icon = "🪠", orderIndex = 2),
+            SubCategory(id = 5007, parentCategoryId = 1002, nameAr = "صيانة مكيفات", icon = "❄️", orderIndex = 3),
+            SubCategory(id = 5008, parentCategoryId = 1001, nameAr = "تمديد شبكات", icon = "🎛️", orderIndex = 1),
+            SubCategory(id = 5009, parentCategoryId = 1001, nameAr = "برمجة وبطاقات", icon = "💳", orderIndex = 2)
+        )
+    }
+
+    fun addSubCategory(parentCategoryId: Int, nameAr: String, icon: String, orderIndex: Int, onComplete: (Boolean) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isLoading.value = true
+            try {
+                val nextId = (_subCategories.value.mapNotNull { it.id }.maxOfOrNull { it } ?: 5000) + 1
+                val subCat = SubCategory(
+                    id = nextId,
+                    parentCategoryId = parentCategoryId,
+                    nameAr = nameAr,
+                    icon = icon,
+                    orderIndex = orderIndex,
+                    createdAt = System.currentTimeMillis().toString()
+                )
+                val list = _subCategories.value.toMutableList()
+                list.add(subCat)
+                _subCategories.value = list
+                saveSubCategories()
+                handlerSuccessOnMain { onComplete(true) }
+            } catch (e: Exception) {
+                Log.e("DaliliViewModel", "Add subcategory failed", e)
+                handlerSuccessOnMain { onComplete(false) }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun updateWelcomeConfig(text: String, image: String, size: Int, onComplete: (Boolean) -> Unit = {}) {
+        sharedPrefs.edit()
+            .putString("welcome_text", text)
+            .putString("welcome_image", image)
+            .putInt("welcome_size", size)
+            .apply()
+        _welcomeText.value = text
+        _welcomeImage.value = image
+        _welcomeSize.value = size
+        onComplete(true)
     }
 }

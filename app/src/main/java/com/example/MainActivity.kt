@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -48,6 +49,7 @@ import com.example.data.Admin
 import com.example.data.Category
 import com.example.data.ServiceProvider
 import com.example.data.PendingProvider
+import com.example.data.SubCategory
 import com.example.ui.DaliliViewModel
 import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -272,6 +274,9 @@ fun HomeScreen(
     val isOnline by viewModel.isCloudConnected.collectAsState()
     val customAppNameVal by viewModel.customAppName.collectAsState()
     val customAppLogoVal by viewModel.customAppLogo.collectAsState()
+    val welcomeTextVal by viewModel.welcomeText.collectAsState()
+    val welcomeImageVal by viewModel.welcomeImage.collectAsState()
+    val welcomeSizeVal by viewModel.welcomeSize.collectAsState()
     val isAr by viewModel.isArabic.collectAsState()
     val currentThemeChoice by viewModel.currentTheme.collectAsState()
 
@@ -361,17 +366,14 @@ fun HomeScreen(
             },
             title = {
                 Text(
-                    text = if (isOnline) tr("المزامنة السحابية نشطة ومتصلة", "Cloud Sync Active") else tr("الوضع المحلي الهجين", "Offline Local Hybrid"),
+                    text = tr("البيانات المحلية والذاكرة نشطة", "Local Storage Active"),
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
             },
             text = {
                 Text(
-                    text = if (isOnline) 
-                        tr("التطبيق متصل بـ Firebase Firestore بنجاح. أي تعديل يظهر فوراً لدى جميع الأجهزة المتصلة!", "Successfully connected to Firebase Firestore. Changes appear in real-time on all clients!") 
-                    else 
-                        tr("يتعذر الاتصال بالإنترنت حالياً. يعمل تطبيق دليلي في الوضع المحلي الهجين المسبق لتصفح مقدمي الخدمات والاتصال بهم بسرعة.", "No network connection. Running in local cache hybrid mode for seamless offline operation."),
+                    text = tr("يعمل تطبيق دليلي في وضع البيانات المحلية السريعة والمستقلة بالكامل حالياً لتصفح مقدمي الخدمات والاتصال بهم وإضافة التعليقات على جهازك.", "Running in high-speed independent local storage mode to browse, call, and write reviews directly on your device."),
                     fontSize = 13.sp,
                     lineHeight = 18.sp
                 )
@@ -809,7 +811,7 @@ fun HomeScreen(
         ) {
             Text(
                 text = customAppLogoVal,
-                fontSize = 26.sp,
+                fontSize = 28.sp,
                 modifier = Modifier.padding(end = 8.dp)
             )
             Text(
@@ -821,16 +823,51 @@ fun HomeScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        // Subtext description
-        Text(
-            text = tr("المساعد الفوري للوصول إلى الخدمات ومقدمي الخدمات المحليين بلحظة واحدة.", "The instant portal of local services and professionals in one single click."),
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 8.dp)
-        )
+        // Styled Custom Welcome Box
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 16.dp)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), shape = RoundedCornerShape(16.dp))
+                .padding(14.dp)
+        ) {
+            val isImageUrl = welcomeImageVal.startsWith("http://") || welcomeImageVal.startsWith("https://")
+            if (isImageUrl) {
+                Card(
+                    shape = CircleShape,
+                    modifier = Modifier.size(64.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    AsyncImage(
+                        model = welcomeImageVal,
+                        contentDescription = "صورة الترحيب",
+                        modifier = Modifier.size(64.dp),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    )
+                }
+            } else {
+                Text(
+                    text = welcomeImageVal,
+                    fontSize = 32.sp,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = welcomeTextVal,
+                fontSize = welcomeSizeVal.sp,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                lineHeight = (welcomeSizeVal + 6).sp,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.height(10.dp))
 
@@ -1014,6 +1051,8 @@ fun CategoryProvidersScreen(
     viewModel: DaliliViewModel
 ) {
     val context = LocalContext.current
+    val currentUser by viewModel.currentUser.collectAsState()
+    val isAdmin = currentUser != null
     var qInput by remember { mutableStateOf("") }
     var activeProviderReviewsTarget by remember { mutableStateOf<ServiceProvider?>(null) }
     
@@ -1023,11 +1062,34 @@ fun CategoryProvidersScreen(
     var distanceFilter by remember { mutableStateOf("all") } // "all", "near", "medium", "far"
     var priceFilter by remember { mutableStateOf("all") } // "all", "low", "medium", "high"
 
+    // Subcategories State
+    val subCategoriesState by viewModel.subCategories.collectAsState()
+    val currentMainCategorySubCategories = remember(subCategoriesState, category.id) {
+        subCategoriesState.filter { it.parentCategoryId == category.id }
+    }
+
+    var categoryBackStack by remember { mutableStateOf<List<SubCategory>>(emptyList()) }
+    val selectedSubCategory = categoryBackStack.lastOrNull()
+
+    val customOnBackClick = {
+        if (categoryBackStack.isNotEmpty()) {
+            categoryBackStack = categoryBackStack.dropLast(1)
+        } else {
+            onBackClick()
+        }
+    }
+
+    // Set custom localized BackHandler
+    androidx.activity.compose.BackHandler(enabled = true) {
+        customOnBackClick()
+    }
+
     // Filter by Category ID & Filter query name & Advanced parameters
-    val filteredList = remember(allProviders, category.id, qInput, ratingFilter, distanceFilter, priceFilter) {
+    val filteredList = remember(allProviders, category.id, selectedSubCategory, qInput, ratingFilter, distanceFilter, priceFilter) {
         allProviders.filter { 
             it.categoryId == category.id && 
             it.isActive &&
+            (selectedSubCategory == null || it.subCategoryId == selectedSubCategory.id) &&
             (qInput.isEmpty() || it.name.contains(qInput, ignoreCase = true) || it.phone.contains(qInput, ignoreCase = true)) &&
             (ratingFilter == 0.0 || it.rating >= ratingFilter) &&
             (distanceFilter == "all" || it.distanceCategory == distanceFilter) &&
@@ -1041,8 +1103,6 @@ fun CategoryProvidersScreen(
         val providerReviews = remember(reviewsState, provider.id) {
             reviewsState.filter { it.providerId == provider.id }
         }
-        val currentUser by viewModel.currentUser.collectAsState()
-        val isAdmin = currentUser != null
 
         var reviewerName by remember { mutableStateOf("") }
         var reviewComment by remember { mutableStateOf("") }
@@ -1505,7 +1565,7 @@ fun CategoryProvidersScreen(
                 modifier = Modifier.weight(1f)
             )
             IconButton(
-                onClick = onBackClick,
+                onClick = customOnBackClick,
                 modifier = Modifier.testTag("providers_back_button")
             ) {
                 Icon(
@@ -1538,6 +1598,166 @@ fun CategoryProvidersScreen(
                 .fillMaxWidth()
                 .padding(bottom = 12.dp)
         )
+
+        // State for add dialog
+        var showAddSubCategoryDialog by remember { mutableStateOf(false) }
+
+        // Subcategories Navigation Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // "All" Tab
+                item {
+                    val isSelected = categoryBackStack.isEmpty()
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            categoryBackStack = emptyList()
+                        },
+                        label = { Text("الكل", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Text("📁", fontSize = 14.sp) }
+                    )
+                }
+
+                // Subcategories Tabs
+                items(currentMainCategorySubCategories) { subCat ->
+                    val isSelected = selectedSubCategory?.id == subCat.id
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            if (!isSelected) {
+                                // Add to backstack
+                                categoryBackStack = categoryBackStack + subCat
+                            }
+                        },
+                        label = { Text(subCat.nameAr, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        leadingIcon = { Text(subCat.icon, fontSize = 14.sp) }
+                    )
+                }
+            }
+
+            // Plus "+" Add button directly next to the subcategories bar (Admins only)
+            if (isAdmin) {
+                Spacer(modifier = Modifier.width(6.dp))
+                IconButton(
+                    onClick = { showAddSubCategoryDialog = true },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(MaterialTheme.colorScheme.primaryContainer, shape = CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "إضافة قسم فرعي جديد",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        // Add Subcategory dialog
+        if (showAddSubCategoryDialog) {
+            var subCategoryNameAr by remember { mutableStateOf("") }
+            var subCategoryIcon by remember { mutableStateOf("🏷️") }
+            var subCategoryOrder by remember { mutableStateOf("") }
+            var errorText by remember { mutableStateOf<String?>(null) }
+
+            AlertDialog(
+                onDismissRequest = { showAddSubCategoryDialog = false },
+                title = {
+                    Text(
+                        text = "إضافة قسم فرعي جديد",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Right,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.End
+                    ) {
+                        Text(
+                            text = "مضاف في القسم الرئيسي: ${category.nameAr}",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = subCategoryNameAr,
+                            onValueChange = { subCategoryNameAr = it },
+                            label = { Text("اسم القسم الفرعي (بالعربية)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                        )
+
+                        OutlinedTextField(
+                            value = subCategoryIcon,
+                            onValueChange = { subCategoryIcon = it },
+                            label = { Text("أيقونة أو رمز تعبيري (Emoji/Symbol)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                        )
+
+                        OutlinedTextField(
+                            value = subCategoryOrder,
+                            onValueChange = { subCategoryOrder = it },
+                            label = { Text("الترتيب (رقم تصاعدي)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                        )
+
+                        errorText?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (subCategoryNameAr.trim().isEmpty()) {
+                                errorText = "الرجاء كتابة اسم القسم الفرعي!"
+                            } else {
+                                val orderIdx = subCategoryOrder.toIntOrNull() ?: (currentMainCategorySubCategories.size + 1)
+                                viewModel.addSubCategory(
+                                    parentCategoryId = category.id ?: 0,
+                                    nameAr = subCategoryNameAr.trim(),
+                                    icon = subCategoryIcon.trim(),
+                                    orderIndex = orderIdx
+                                ) { success ->
+                                    if (success) {
+                                        showAddSubCategoryDialog = false
+                                        Toast.makeText(context, "تم إضافة القسم الفرعي بنجاح!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        errorText = "فشلت عملية الإضافة!"
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text("حفظ")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showAddSubCategoryDialog = false }) {
+                        Text("إلغاء")
+                    }
+                }
+            )
+        }
 
         // Filter options row
         Row(
@@ -2343,8 +2563,16 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
     val savedAppName by viewModel.customAppName.collectAsState()
     val savedAppLogo by viewModel.customAppLogo.collectAsState()
 
+    val welcomeTextVal by viewModel.welcomeText.collectAsState()
+    val welcomeImageVal by viewModel.welcomeImage.collectAsState()
+    val welcomeSizeVal by viewModel.welcomeSize.collectAsState()
+
     var appNameInput by remember(savedAppName) { mutableStateOf(savedAppName) }
     var appLogoInput by remember(savedAppLogo) { mutableStateOf(savedAppLogo) }
+
+    var welcomeTextInput by remember(welcomeTextVal) { mutableStateOf(welcomeTextVal) }
+    var welcomeImageInput by remember(welcomeImageVal) { mutableStateOf(welcomeImageVal) }
+    var welcomeSizeInput by remember(welcomeSizeVal) { mutableStateOf(welcomeSizeVal.toString()) }
 
     Column(
         modifier = Modifier
@@ -2414,6 +2642,86 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
                     Icon(Icons.Default.Done, contentDescription = "حفظ الهوية", tint = Color.White)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("حفظ وتطبيق الهوية فوراً", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            }
+        }
+
+        // App Custom Welcome Message Configuration Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                Text(
+                    text = "تخصيص رسالة الترحيب والواجهة 🌊",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "قم بتحديث المظهر النصي، والأيقونة المرافقة لرسالة الترحيب وحجمها مباشرة على الشاشة الرئيسية.",
+                    fontSize = 11.sp,
+                    color = Color.Gray,
+                    textAlign = TextAlign.Right,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                OutlinedTextField(
+                    value = welcomeTextInput,
+                    onValueChange = { welcomeTextInput = it },
+                    label = { Text("المحتوى النصي لرسالة الترحيب", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = false,
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                )
+
+                OutlinedTextField(
+                    value = welcomeImageInput,
+                    onValueChange = { welcomeImageInput = it },
+                    label = { Text("أيقونة أو رمز ترحيبي تعبيري (Emoji/Icon / URL)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                )
+
+                OutlinedTextField(
+                    value = welcomeSizeInput,
+                    onValueChange = { welcomeSizeInput = it },
+                    label = { Text("حجم الخط لرسالة الترحيب (مثال: 14)", textAlign = TextAlign.Right, modifier = Modifier.fillMaxWidth()) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
+                )
+
+                Button(
+                    onClick = {
+                        val sizeInt = welcomeSizeInput.toIntOrNull() ?: 14
+                        if (welcomeTextInput.trim().isEmpty()) {
+                            Toast.makeText(context, "الرجاء عدم إبقاء نص الترحيب فارغاً!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            viewModel.updateWelcomeConfig(welcomeTextInput.trim(), welcomeImageInput.trim(), sizeInt) { ok ->
+                                if (ok) {
+                                    Toast.makeText(context, "تم حفظ تعديلات رسالة الترحيب بنجاح! 🎉", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Done, contentDescription = "حفظ الترحيب", tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("حفظ وتعديل الترحيب", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             }
         }
@@ -3066,6 +3374,7 @@ fun ProvidersManagementSubscreen(
         var nameIn by remember { mutableStateOf(provTarget.name) }
         var phoneIn by remember { mutableStateOf(provTarget.phone) }
         var categoryIdIn by remember { mutableStateOf(provTarget.categoryId) }
+        var subCategoryIdIn by remember { mutableStateOf(provTarget.subCategoryId) }
         var ratingIn by remember { mutableStateOf(provTarget.rating.toString()) }
         var imageUrlIn by remember { mutableStateOf(provTarget.imageUrl ?: "") }
         var isActiveIn by remember { mutableStateOf(provTarget.isActive) }
@@ -3076,6 +3385,11 @@ fun ProvidersManagementSubscreen(
         var errorHint by remember { mutableStateOf<String?>(null) }
         
         var dropdownExpanded by remember { mutableStateOf(false) }
+        var subDropdownExpanded by remember { mutableStateOf(false) }
+        val subCategoriesState by viewModel.subCategories.collectAsState()
+        val availableSubCategories = remember(subCategoriesState, categoryIdIn) {
+            subCategoriesState.filter { it.parentCategoryId == categoryIdIn }
+        }
 
         LaunchedEffect(uploadedProviderUrlForDialog) {
             uploadedProviderUrlForDialog?.let {
@@ -3143,10 +3457,46 @@ fun ProvidersManagementSubscreen(
                                     DropdownMenuItem(
                                         text = { Text(cat.nameAr, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
                                         onClick = {
-                                            cat.id?.let { categoryIdIn = it }
+                                            cat.id?.let {
+                                                categoryIdIn = it
+                                                subCategoryIdIn = null // reset subcategory on category change
+                                            }
                                             dropdownExpanded = false
                                         }
                                     )
+                                }
+                            }
+                        }
+
+                        if (availableSubCategories.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            val selectedSubCategory = availableSubCategories.firstOrNull { it.id == subCategoryIdIn }
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = { subDropdownExpanded = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+                                ) {
+                                    Text(
+                                        text = "القسم الفرعي: ${selectedSubCategory?.nameAr ?: "اضغط للاختيار"}",
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = subDropdownExpanded,
+                                    onDismissRequest = { subDropdownExpanded = false }
+                                ) {
+                                    availableSubCategories.forEach { subCat ->
+                                        DropdownMenuItem(
+                                            text = { Text("${subCat.icon} ${subCat.nameAr}", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.End) },
+                                            onClick = {
+                                                subCategoryIdIn = subCat.id
+                                                subDropdownExpanded = false
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -3307,6 +3657,7 @@ fun ProvidersManagementSubscreen(
                             name = nameIn.trim(),
                             phone = phoneIn.trim(),
                             categoryId = categoryIdIn,
+                            subCategoryId = subCategoryIdIn,
                             rating = currentRating,
                             imageUrl = imageUrlIn.trim(),
                             isActive = isActiveIn,
@@ -3329,6 +3680,7 @@ fun ProvidersManagementSubscreen(
                                 name = nameIn.trim(),
                                 phone = phoneIn.trim(),
                                 categoryId = categoryIdIn,
+                                subCategoryId = subCategoryIdIn,
                                 rating = currentRating,
                                 imageUrl = imageUrlIn.trim(),
                                 isActive = isActiveIn,
