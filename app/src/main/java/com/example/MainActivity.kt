@@ -837,14 +837,14 @@ fun HomeScreen(
             val isImageUrl = welcomeImageVal.startsWith("http://") || welcomeImageVal.startsWith("https://")
             if (isImageUrl) {
                 Card(
-                    shape = CircleShape,
-                    modifier = Modifier.size(64.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                 ) {
                     AsyncImage(
                         model = welcomeImageVal,
                         contentDescription = "صورة الترحيب",
-                        modifier = Modifier.size(64.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop
                     )
                 }
@@ -856,17 +856,18 @@ fun HomeScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = welcomeTextVal,
-                fontSize = welcomeSizeVal.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                lineHeight = (welcomeSizeVal + 6).sp,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
+            if (welcomeTextVal.trim().isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = welcomeTextVal,
+                    fontSize = welcomeSizeVal.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    lineHeight = (welcomeSizeVal + 6).sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
@@ -2574,6 +2575,23 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
     var welcomeImageInput by remember(welcomeImageVal) { mutableStateOf(welcomeImageVal) }
     var welcomeSizeInput by remember(welcomeSizeVal) { mutableStateOf(welcomeSizeVal.toString()) }
 
+    var welcomeUploadStatusMessage by remember { mutableStateOf("") }
+    val welcomeImageLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            welcomeUploadStatusMessage = "جاري رفع الصورة..."
+            viewModel.uploadImageToFirebaseStorage(it, "welcome_banners") { downloadUrl ->
+                if (downloadUrl != null) {
+                    welcomeImageInput = downloadUrl
+                    welcomeUploadStatusMessage = "تم رفع الصورة بنجاح!"
+                } else {
+                    welcomeUploadStatusMessage = "خطأ في رفع صورة الترحيب"
+                }
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2693,6 +2711,33 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
                     textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Right)
                 )
 
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (welcomeUploadStatusMessage.isNotEmpty()) {
+                        Text(
+                            text = welcomeUploadStatusMessage,
+                            fontSize = 11.sp,
+                            color = if (welcomeUploadStatusMessage.contains("نجاح")) Color(0xFF4CAF50) else Color.Red,
+                            textAlign = TextAlign.Right,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+                    
+                    Button(
+                        onClick = { welcomeImageLauncher.launch("image/*") },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f), contentColor = MaterialTheme.colorScheme.primary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Text("اختر صورة من الاستوديو 🖼️", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 OutlinedTextField(
                     value = welcomeSizeInput,
                     onValueChange = { welcomeSizeInput = it },
@@ -2705,7 +2750,8 @@ fun SettingsManagementSubscreen(viewModel: DaliliViewModel) {
                 Button(
                     onClick = {
                         val sizeInt = welcomeSizeInput.toIntOrNull() ?: 14
-                        if (welcomeTextInput.trim().isEmpty()) {
+                        val isImage = welcomeImageInput.startsWith("http://") || welcomeImageInput.startsWith("https://")
+                        if (welcomeTextInput.trim().isEmpty() && !isImage) {
                             Toast.makeText(context, "الرجاء عدم إبقاء نص الترحيب فارغاً!", Toast.LENGTH_SHORT).show()
                         } else {
                             viewModel.updateWelcomeConfig(welcomeTextInput.trim(), welcomeImageInput.trim(), sizeInt) { ok ->

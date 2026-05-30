@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.example.utils.NotificationHelper
@@ -132,6 +133,44 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun listenToFirestore() {
         _isCloudConnected.value = false
+
+        // Listen to app config (branding, colors/theme, welcome text/image size)
+        db.collection("app_config").document("global")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to app_config failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val appName = snapshot.getString("app_name") ?: "دليلي - Dalili"
+                    val appLogo = snapshot.getString("app_logo") ?: "📡"
+                    val welcomeText = snapshot.getString("welcome_text") ?: "المساعد الفوري للوصول إلى الخدمات ومقدمي الخدمات المحليين بلحظة واحدة."
+                    val welcomeImage = snapshot.getString("welcome_image") ?: "📡"
+                    val welcomeSize = snapshot.getLong("welcome_size")?.toInt() ?: 13
+                    val themeChoice = snapshot.getString("theme_choice") ?: "red_black"
+
+                    _customAppName.value = appName
+                    _customAppLogo.value = appLogo
+                    _welcomeText.value = welcomeText
+                    _welcomeImage.value = welcomeImage
+                    _welcomeSize.value = welcomeSize
+                    
+                    if (_currentTheme.value != themeChoice) {
+                        _currentTheme.value = themeChoice
+                    }
+
+                    sharedPrefs.edit()
+                        .putString("custom_app_name", appName)
+                        .putString("custom_app_logo", appLogo)
+                        .putString("welcome_text", welcomeText)
+                        .putString("welcome_image", welcomeImage)
+                        .putInt("welcome_size", welcomeSize)
+                        .putString("app_theme_choice", themeChoice)
+                        .apply()
+                } else {
+                    seedDefaultAppConfig()
+                }
+            }
 
         // Listen to categories
         db.collection("categories")
@@ -427,6 +466,18 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         db.collection("admins").document(defaultAdmin.id.toString()).set(data)
     }
 
+    private fun seedDefaultAppConfig() {
+        val data = mapOf(
+            "app_name" to "دليلي - Dalili",
+            "app_logo" to "📡",
+            "welcome_text" to "المساعد الفوري للوصول إلى الخدمات ومقدمي الخدمات المحليين بلحظة واحدة.",
+            "welcome_image" to "📡",
+            "welcome_size" to 13,
+            "theme_choice" to "red_black"
+        )
+        db.collection("app_config").document("global").set(data, com.google.firebase.firestore.SetOptions.merge())
+    }
+
     private fun loadLocalData() {
         try {
             // Load Settings from shared preferences (or use defaults)
@@ -457,6 +508,11 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun setAppTheme(theme: String) {
         sharedPrefs.edit().putString("app_theme_choice", theme).apply()
         _currentTheme.value = theme
+        db.collection("app_config").document("global")
+            .set(mapOf("theme_choice" to theme), com.google.firebase.firestore.SetOptions.merge())
+            .addOnFailureListener { e ->
+                Log.e("DaliliViewModel", "Failed to sync theme choice: $e")
+            }
     }
 
     fun toggleDarkMode() {
@@ -970,12 +1026,22 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     // BRANDING CUSTOMIZATION
     fun updateAppNameAndLogo(name: String, logo: String) {
-        sharedPrefs.edit()
-            .putString("custom_app_name", name)
-            .putString("custom_app_logo", logo)
-            .apply()
-        _customAppName.value = name
-        _customAppLogo.value = logo
+        val data = mapOf(
+            "app_name" to name,
+            "app_logo" to logo
+        )
+        db.collection("app_config").document("global")
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    sharedPrefs.edit()
+                        .putString("custom_app_name", name)
+                        .putString("custom_app_logo", logo)
+                        .apply()
+                    _customAppName.value = name
+                    _customAppLogo.value = logo
+                }
+            }
     }
 
     fun updateSystemConfig(phone: String, email: String, whatsapp: String, footer: String, showF: Boolean, onComplete: (Boolean) -> Unit = {}) {
@@ -1010,7 +1076,25 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     // IMAGE FILE UPLOAD
     fun uploadImageToFirebaseStorage(uri: Uri, folder: String, onComplete: (String?) -> Unit) {
-        onComplete(uri.toString())
+        try {
+            val storageRef = FirebaseStorage.getInstance().reference
+            val fileRef = storageRef.child("$folder/${java.util.UUID.randomUUID()}.jpg")
+            fileRef.putFile(uri)
+                .addOnSuccessListener {
+                    fileRef.downloadUrl.addOnSuccessListener { downloadUri ->
+                        onComplete(downloadUri.toString())
+                    }.addOnFailureListener {
+                        onComplete(uri.toString()) // fallback
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.e("DaliliViewModel", "Storage upload failed: $e")
+                    onComplete(uri.toString()) // fallback
+                }
+        } catch (e: Exception) {
+            Log.e("DaliliViewModel", "Storage init/upload failed: $e")
+            onComplete(uri.toString()) // fallback
+        }
     }
 
     // SMART ASSISTANT METHODS
@@ -1286,14 +1370,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateWelcomeConfig(text: String, image: String, size: Int, onComplete: (Boolean) -> Unit = {}) {
-        sharedPrefs.edit()
-            .putString("welcome_text", text)
-            .putString("welcome_image", image)
-            .putInt("welcome_size", size)
-            .apply()
-        _welcomeText.value = text
-        _welcomeImage.value = image
-        _welcomeSize.value = size
-        onComplete(true)
+        val data = mapOf(
+            "welcome_text" to text,
+            "welcome_image" to image,
+            "welcome_size" to size
+        )
+        db.collection("app_config").document("global")
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    sharedPrefs.edit()
+                        .putString("welcome_text", text)
+                        .putString("welcome_image", image)
+                        .putInt("welcome_size", size)
+                        .apply()
+                    _welcomeText.value = text
+                    _welcomeImage.value = image
+                    _welcomeSize.value = size
+                    handlerSuccessOnMain { onComplete(true) }
+                } else {
+                    handlerSuccessOnMain { onComplete(false) }
+                }
+            }
     }
 }
