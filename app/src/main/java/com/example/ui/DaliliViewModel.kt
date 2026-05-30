@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
+import com.google.firebase.firestore.FirebaseFirestore
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.example.utils.NotificationHelper
@@ -111,6 +112,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
 
+    private val db = FirebaseFirestore.getInstance()
+
     init {
         // Recover logged in user session if present
         val savedUsername = sharedPrefs.getString("saved_username", null)
@@ -123,8 +126,305 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        // Load local persistent cache instead of Firebase Realtime listeners
         loadLocalData()
+        listenToFirestore()
+    }
+
+    private fun listenToFirestore() {
+        _isCloudConnected.value = false
+
+        // Listen to categories
+        db.collection("categories")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to categories failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    _isCloudConnected.value = true
+                    if (snapshot.isEmpty) {
+                        seedDefaultCategories()
+                    } else {
+                        val list = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val idLong = doc.getLong("id") ?: doc.id.toLongOrNull() ?: return@mapNotNull null
+                                val nameAr = doc.getString("name_ar") ?: doc.getString("nameAr") ?: ""
+                                val icon = doc.getString("icon") ?: ""
+                                val orderIndex = doc.getLong("order_index")?.toInt() ?: doc.getLong("orderIndex")?.toInt() ?: 0
+                                val createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
+                                Category(id = idLong.toInt(), nameAr = nameAr, icon = icon, orderIndex = orderIndex, createdAt = createdAt)
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Error parsing category: ${doc.id}", e)
+                                null
+                            }
+                        }.sortedBy { it.orderIndex }
+                        _categories.value = list
+                    }
+                }
+            }
+
+        // Listen to subcategories
+        db.collection("subcategories")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to subcategories failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    if (snapshot.isEmpty) {
+                        seedDefaultSubCategories()
+                    } else {
+                        val list = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val idLong = doc.getLong("id") ?: doc.id.toLongOrNull() ?: return@mapNotNull null
+                                val parentCategoryId = doc.getLong("parent_category_id")?.toInt() ?: doc.getLong("parentCategoryId")?.toInt() ?: 0
+                                val nameAr = doc.getString("name_ar") ?: doc.getString("nameAr") ?: ""
+                                val icon = doc.getString("icon") ?: ""
+                                val orderIndex = doc.getLong("order_index")?.toInt() ?: doc.getLong("orderIndex")?.toInt() ?: 0
+                                val createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
+                                SubCategory(id = idLong.toInt(), parentCategoryId = parentCategoryId, nameAr = nameAr, icon = icon, orderIndex = orderIndex, createdAt = createdAt)
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Error parsing subcategory: ${doc.id}", e)
+                                null
+                            }
+                        }.sortedBy { it.orderIndex }
+                        _subCategories.value = list
+                    }
+                }
+            }
+
+        // Listen to service providers
+        db.collection("service_providers")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to providers failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    if (snapshot.isEmpty) {
+                        seedDefaultProviders()
+                    } else {
+                        val list = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val idLong = doc.getLong("id") ?: doc.id.toLongOrNull() ?: return@mapNotNull null
+                                val name = doc.getString("name") ?: ""
+                                val phone = doc.getString("phone") ?: ""
+                                val categoryId = doc.getLong("category_id")?.toInt() ?: doc.getLong("categoryId")?.toInt() ?: 0
+                                val subCategoryId = doc.getLong("sub_category_id")?.toInt() ?: doc.getLong("subCategoryId")?.toInt()
+                                val rating = doc.getDouble("rating") ?: 5.0
+                                val imageUrl = doc.getString("image_url") ?: doc.getString("imageUrl")
+                                val isActive = doc.getBoolean("is_active") ?: doc.getBoolean("isActive") ?: true
+                                val createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
+                                val lat = doc.getDouble("lat")
+                                val lng = doc.getDouble("lng")
+                                val priceCategory = doc.getString("price_category") ?: doc.getString("priceCategory") ?: "medium"
+                                val distanceCategory = doc.getString("distance_category") ?: doc.getString("distanceCategory") ?: "medium"
+                                ServiceProvider(
+                                    id = idLong.toInt(),
+                                    name = name,
+                                    phone = phone,
+                                    categoryId = categoryId,
+                                    subCategoryId = subCategoryId,
+                                    rating = rating,
+                                    imageUrl = imageUrl,
+                                    isActive = isActive,
+                                    createdAt = createdAt,
+                                    lat = lat,
+                                    lng = lng,
+                                    priceCategory = priceCategory,
+                                    distanceCategory = distanceCategory
+                                )
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Error parsing provider: ${doc.id}", e)
+                                null
+                            }
+                        }
+                        _serviceProviders.value = list
+                    }
+                }
+            }
+
+        // Listen to reviews
+        db.collection("reviews")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to reviews failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    if (snapshot.isEmpty) {
+                        seedDefaultReviews()
+                    } else {
+                        val list = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val idLong = doc.getLong("id") ?: doc.id.toLongOrNull() ?: return@mapNotNull null
+                                val providerId = doc.getLong("provider_id")?.toInt() ?: doc.getLong("providerId")?.toInt() ?: 0
+                                val userName = doc.getString("user_name") ?: doc.getString("userName") ?: ""
+                                val comment = doc.getString("comment") ?: ""
+                                val rating = doc.getDouble("rating") ?: 5.0
+                                val createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
+                                Review(id = idLong.toInt(), providerId = providerId, userName = userName, comment = comment, rating = rating, createdAt = createdAt)
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Error parsing review: ${doc.id}", e)
+                                null
+                            }
+                        }
+                        _reviews.value = list
+                    }
+                }
+            }
+
+        // Listen to admins
+        db.collection("admins")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to admins failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    if (snapshot.isEmpty) {
+                        seedDefaultAdmins()
+                    } else {
+                        val list = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val idLong = doc.getLong("id") ?: doc.id.toLongOrNull() ?: return@mapNotNull null
+                                val username = doc.getString("username") ?: ""
+                                val passwordHash = doc.getString("password_hash") ?: doc.getString("passwordHash") ?: ""
+                                val role = doc.getString("role") ?: "admin"
+                                val createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
+                                Admin(id = idLong.toInt(), username = username, passwordHash = passwordHash, role = role, createdAt = createdAt)
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Error parsing admin: ${doc.id}", e)
+                                null
+                            }
+                        }
+                        _admins.value = list
+                    }
+                }
+            }
+
+        // Listen to pending providers
+        db.collection("pending_providers")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("DaliliViewModel", "Listen to pending_providers failed", error)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            val id = doc.id
+                            val name = doc.getString("name") ?: ""
+                            val phone = doc.getString("phone") ?: ""
+                            val categoryId = doc.getLong("category_id")?.toInt() ?: doc.getLong("categoryId")?.toInt() ?: 0
+                            val subCategoryId = doc.getLong("sub_category_id")?.toInt() ?: doc.getLong("subCategoryId")?.toInt()
+                            val region = doc.getString("region") ?: ""
+                            val imageUrl = doc.getString("image_url") ?: doc.getString("imageUrl")
+                            val status = doc.getString("status") ?: "pending"
+                            val createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
+                            PendingProvider(
+                                id = id,
+                                name = name,
+                                phone = phone,
+                                categoryId = categoryId,
+                                subCategoryId = subCategoryId,
+                                region = region,
+                                imageUrl = imageUrl,
+                                status = status,
+                                createdAt = createdAt
+                            )
+                        } catch (e: Exception) {
+                            Log.e("DaliliViewModel", "Error parsing pending: ${doc.id}", e)
+                            null
+                        }
+                    }
+                    _pendingProviders.value = list
+                }
+            }
+    }
+
+    private fun seedDefaultCategories() {
+        val defaults = getDefaultCategories()
+        defaults.forEach { cat ->
+            val data = mapOf(
+                "id" to cat.id,
+                "name_ar" to cat.nameAr,
+                "icon" to cat.icon,
+                "order_index" to cat.orderIndex,
+                "created_at" to cat.createdAt
+            )
+            db.collection("categories").document(cat.id.toString()).set(data)
+        }
+    }
+
+    private fun seedDefaultSubCategories() {
+        val defaults = getDefaultSubCategories()
+        defaults.forEach { subCat ->
+            val data = mapOf(
+                "id" to subCat.id,
+                "parent_category_id" to subCat.parentCategoryId,
+                "name_ar" to subCat.nameAr,
+                "icon" to subCat.icon,
+                "order_index" to subCat.orderIndex,
+                "created_at" to subCat.createdAt
+            )
+            db.collection("subcategories").document(subCat.id.toString()).set(data)
+        }
+    }
+
+    private fun seedDefaultProviders() {
+        val defaults = getDefaultProviders()
+        defaults.forEach { prov ->
+            val data = mapOf(
+                "id" to prov.id,
+                "name" to prov.name,
+                "phone" to prov.phone,
+                "category_id" to prov.categoryId,
+                "sub_category_id" to prov.subCategoryId,
+                "rating" to prov.rating,
+                "image_url" to prov.imageUrl,
+                "is_active" to prov.isActive,
+                "created_at" to prov.createdAt,
+                "lat" to prov.lat,
+                "lng" to prov.lng,
+                "price_category" to prov.priceCategory,
+                "distance_category" to prov.distanceCategory
+            )
+            db.collection("service_providers").document(prov.id.toString()).set(data)
+        }
+    }
+
+    private fun seedDefaultReviews() {
+        val defaults = getDefaultReviews()
+        defaults.forEach { r ->
+            val data = mapOf(
+                "id" to r.id,
+                "provider_id" to r.providerId,
+                "user_name" to r.userName,
+                "comment" to r.comment,
+                "rating" to r.rating,
+                "created_at" to r.createdAt
+            )
+            db.collection("reviews").document(r.id.toString()).set(data)
+        }
+    }
+
+    private fun seedDefaultAdmins() {
+        val defaultAdmin = Admin(
+            id = 1,
+            username = "admin",
+            passwordHash = "maher736462",
+            role = "super_admin",
+            createdAt = System.currentTimeMillis().toString()
+        )
+        val data = mapOf(
+            "id" to defaultAdmin.id,
+            "username" to defaultAdmin.username,
+            "password_hash" to defaultAdmin.passwordHash,
+            "role" to defaultAdmin.role,
+            "created_at" to defaultAdmin.createdAt
+        )
+        db.collection("admins").document(defaultAdmin.id.toString()).set(data)
     }
 
     private fun loadLocalData() {
@@ -137,114 +437,17 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _showFooter.value = sharedPrefs.getBoolean("show_footer", true)
             _userLaunches.value = sharedPrefs.getInt("user_launches", 0)
             _callsCount.value = sharedPrefs.getInt("calls_count", 0)
-
-            // 1. Categories
-            val categoriesJson = sharedPrefs.getString("local_categories", null)
-            if (categoriesJson != null) {
-                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Category::class.java)
-                _categories.value = moshi.adapter<List<Category>>(listType).fromJson(categoriesJson) ?: getDefaultCategories()
-            } else {
-                _categories.value = getDefaultCategories()
-                saveCategories()
-            }
-
-            // 1.5. Subcategories
-            val subCategoriesJson = sharedPrefs.getString("local_subcategories", null)
-            if (subCategoriesJson != null) {
-                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, SubCategory::class.java)
-                _subCategories.value = moshi.adapter<List<SubCategory>>(listType).fromJson(subCategoriesJson) ?: getDefaultSubCategories()
-            } else {
-                _subCategories.value = getDefaultSubCategories()
-                saveSubCategories()
-            }
-
-            // 2. Service Providers
-            val providersJson = sharedPrefs.getString("local_service_providers", null)
-            if (providersJson != null) {
-                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, ServiceProvider::class.java)
-                _serviceProviders.value = moshi.adapter<List<ServiceProvider>>(listType).fromJson(providersJson) ?: getDefaultProviders()
-            } else {
-                _serviceProviders.value = getDefaultProviders()
-                saveServiceProviders()
-            }
-
-            // 3. Reviews
-            val reviewsJson = sharedPrefs.getString("local_reviews", null)
-            if (reviewsJson != null) {
-                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Review::class.java)
-                _reviews.value = moshi.adapter<List<Review>>(listType).fromJson(reviewsJson) ?: getDefaultReviews()
-            } else {
-                _reviews.value = getDefaultReviews()
-                saveReviews()
-            }
-
-            // 4. Admins
-            val adminsJson = sharedPrefs.getString("local_admins", null)
-            if (adminsJson != null) {
-                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
-                _admins.value = moshi.adapter<List<Admin>>(listType).fromJson(adminsJson) ?: emptyList()
-            }
-            if (_admins.value.isEmpty()) {
-                val defaultAdmin = Admin(
-                    id = 1,
-                    username = "admin",
-                    passwordHash = "maher736462",
-                    role = "super_admin",
-                    createdAt = System.currentTimeMillis().toString()
-                )
-                _admins.value = listOf(defaultAdmin)
-                saveAdmins()
-            }
-
-            // 5. Pending Providers
-            val pendingJson = sharedPrefs.getString("local_pending_providers", null)
-            if (pendingJson != null) {
-                val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, PendingProvider::class.java)
-                _pendingProviders.value = moshi.adapter<List<PendingProvider>>(listType).fromJson(pendingJson) ?: emptyList()
-            } else {
-                _pendingProviders.value = emptyList()
-                savePendingProviders()
-            }
         } catch (e: Exception) {
             Log.e("DaliliViewModel", "Failed to load local data", e)
         }
     }
 
-    private fun saveCategories() {
-        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Category::class.java)
-        val json = moshi.adapter<List<Category>>(listType).toJson(_categories.value)
-        sharedPrefs.edit().putString("local_categories", json).apply()
-    }
-
-    private fun saveSubCategories() {
-        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, SubCategory::class.java)
-        val json = moshi.adapter<List<SubCategory>>(listType).toJson(_subCategories.value)
-        sharedPrefs.edit().putString("local_subcategories", json).apply()
-    }
-
-    private fun saveServiceProviders() {
-        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, ServiceProvider::class.java)
-        val json = moshi.adapter<List<ServiceProvider>>(listType).toJson(_serviceProviders.value)
-        sharedPrefs.edit().putString("local_service_providers", json).apply()
-    }
-
-    private fun saveReviews() {
-        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Review::class.java)
-        val json = moshi.adapter<List<Review>>(listType).toJson(_reviews.value)
-        sharedPrefs.edit().putString("local_reviews", json).apply()
-    }
-
-    private fun saveAdmins() {
-        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, Admin::class.java)
-        val json = moshi.adapter<List<Admin>>(listType).toJson(_admins.value)
-        sharedPrefs.edit().putString("local_admins", json).apply()
-    }
-
-    private fun savePendingProviders() {
-        val listType = com.squareup.moshi.Types.newParameterizedType(List::class.java, PendingProvider::class.java)
-        val json = moshi.adapter<List<PendingProvider>>(listType).toJson(_pendingProviders.value)
-        sharedPrefs.edit().putString("local_pending_providers", json).apply()
-    }
+    private fun saveCategories() {}
+    private fun saveSubCategories() {}
+    private fun saveServiceProviders() {}
+    private fun saveReviews() {}
+    private fun saveAdmins() {}
+    private fun savePendingProviders() {}
 
     // SHARED PREFERENCES THEME & LANGUAGE CONFIG
     fun getAppTheme(): String {
@@ -364,93 +567,86 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     // MANAGE ADMINS (Super Admin only)
     fun addAdmin(usernameInput: String, passwordInput: String, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
                 val hashed = hashPasswordHelper(passwordInput)
                 val newId = (_admins.value.mapNotNull { it.id }.maxOrNull() ?: 10) + 1
-                val newAdmin = Admin(
-                    id = newId,
-                    username = usernameInput,
-                    passwordHash = hashed,
-                    role = "admin",
-                    createdAt = System.currentTimeMillis().toString()
+                val data = mapOf(
+                    "id" to newId,
+                    "username" to usernameInput,
+                    "password_hash" to hashed,
+                    "role" to "admin",
+                    "created_at" to System.currentTimeMillis().toString()
                 )
-                val list = _admins.value.toMutableList()
-                list.add(newAdmin)
-                _admins.value = list
-                saveAdmins()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("admins").document(newId.toString()).set(data)
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add admin failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     fun changeAdminPassword(adminId: Int, newPasswordInput: String, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
                 val hashed = hashPasswordHelper(newPasswordInput)
-                val list = _admins.value.map { admin ->
-                    if (admin.id == adminId) {
-                        admin.copy(passwordHash = hashed)
-                    } else {
-                        admin
+                db.collection("admins").document(adminId.toString()).update("password_hash", hashed)
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
                     }
-                }
-                _admins.value = list
-                saveAdmins()
-                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Change pass failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     fun deleteAdmin(adminId: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
-                val list = _admins.value.filter { it.id != adminId }
-                _admins.value = list
-                saveAdmins()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("admins").document(adminId.toString()).delete()
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete admin failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     // REVIEWS AND RATINGS MANAGEMENT
     fun addReview(providerId: Int, userName: String, comment: String, rating: Double, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
                 val nextId = (_reviews.value.mapNotNull { it.id }.maxOrNull() ?: 3000) + 1
-                val review = Review(
-                    id = nextId,
-                    providerId = providerId,
-                    userName = userName,
-                    comment = comment,
-                    rating = rating,
-                    createdAt = System.currentTimeMillis().toString()
+                val data = mapOf(
+                    "id" to nextId,
+                    "provider_id" to providerId,
+                    "user_name" to userName,
+                    "comment" to comment,
+                    "rating" to rating,
+                    "created_at" to System.currentTimeMillis().toString()
                 )
-                val list = _reviews.value.toMutableList()
-                list.add(review)
-                _reviews.value = list
-                saveReviews()
-
-                recalculateAndSaveProviderRating(providerId)
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("reviews").document(nextId.toString()).set(data)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            recalculateAndSaveProviderRating(providerId)
+                        }
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add review error", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -459,23 +655,22 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteReview(reviewId: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
                 val reviewTarget = _reviews.value.firstOrNull { it.id == reviewId }
-                val list = _reviews.value.filter { it.id != reviewId }
-                _reviews.value = list
-                saveReviews()
-
-                if (reviewTarget != null) {
-                    recalculateAndSaveProviderRating(reviewTarget.providerId)
-                }
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("reviews").document(reviewId.toString()).delete()
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        if (task.isSuccessful && reviewTarget != null) {
+                            recalculateAndSaveProviderRating(reviewTarget.providerId)
+                        }
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete review error", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
@@ -489,80 +684,73 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             String.format("%.1f", avg).toDoubleOrNull() ?: 5.0
         }
 
-        val list = _serviceProviders.value.map { provider ->
-            if (provider.id == providerId) {
-                provider.copy(rating = finalRating)
-            } else {
-                provider
+        db.collection("service_providers").document(providerId.toString()).update("rating", finalRating)
+            .addOnFailureListener { e ->
+                Log.e("DaliliViewModel", "Update rating failed for provider $providerId", e)
             }
-        }
-        _serviceProviders.value = list
-        saveServiceProviders()
     }
 
     // MANAGE CATEGORIES (Admins and Super Admins)
     fun addCategory(nameAr: String, icon: String, orderIndex: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
                 val nextId = (_categories.value.mapNotNull { it.id }.maxOrNull() ?: 1000) + 1
-                val category = Category(
-                    id = nextId,
-                    nameAr = nameAr,
-                    icon = icon,
-                    orderIndex = orderIndex,
-                    createdAt = System.currentTimeMillis().toString()
+                val data = mapOf(
+                    "id" to nextId,
+                    "name_ar" to nameAr,
+                    "icon" to icon,
+                    "order_index" to orderIndex,
+                    "created_at" to System.currentTimeMillis().toString()
                 )
-                val list = _categories.value.toMutableList()
-                list.add(category)
-                _categories.value = list
-                saveCategories()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("categories").document(nextId.toString()).set(data)
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add category failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     fun updateCategory(categoryId: Int, nameAr: String, icon: String, orderIndex: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
-                val list = _categories.value.map { cat ->
-                    if (cat.id == categoryId) {
-                        cat.copy(nameAr = nameAr, icon = icon, orderIndex = orderIndex)
-                    } else {
-                        cat
+                val data = mapOf(
+                    "name_ar" to nameAr,
+                    "icon" to icon,
+                    "order_index" to orderIndex
+                )
+                db.collection("categories").document(categoryId.toString()).update(data)
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
                     }
-                }
-                _categories.value = list
-                saveCategories()
-                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update category failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     fun deleteCategory(categoryId: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
-                val list = _categories.value.filter { it.id != categoryId }
-                _categories.value = list
-                saveCategories()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("categories").document(categoryId.toString()).delete()
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete category failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
@@ -582,46 +770,52 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         distanceCategory: String = "medium",
         onComplete: (Boolean) -> Unit
     ) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
                 val nextId = (_serviceProviders.value.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
-                val provider = ServiceProvider(
-                    id = nextId,
-                    name = name,
-                    phone = phone,
-                    categoryId = categoryId,
-                    subCategoryId = subCategoryId,
-                    rating = rating,
-                    imageUrl = imageUrl,
-                    isActive = isActive,
-                    createdAt = System.currentTimeMillis().toString(),
-                    lat = lat,
-                    lng = lng,
-                    priceCategory = priceCategory,
-                    distanceCategory = distanceCategory
+                val data = mutableMapOf<String, Any?>(
+                    "id" to nextId,
+                    "name" to name,
+                    "phone" to phone,
+                    "category_id" to categoryId,
+                    "rating" to rating,
+                    "image_url" to imageUrl,
+                    "is_active" to isActive,
+                    "created_at" to System.currentTimeMillis().toString(),
+                    "price_category" to priceCategory,
+                    "distance_category" to distanceCategory
                 )
-
-                val list = _serviceProviders.value.toMutableList()
-                list.add(provider)
-                _serviceProviders.value = list
-                saveServiceProviders()
-
-                try {
-                    NotificationHelper.scheduleNotification(
-                        getApplication(),
-                        "تم إضافة خدمة جديدة! 🎉",
-                        "تم إضافة مقدم الخدمة: $name بنجاح!"
-                    )
-                } catch (e: Exception) {
-                    Log.e("DaliliViewModel", "Notification scheduling failed", e)
+                if (subCategoryId != null) {
+                    data["sub_category_id"] = subCategoryId
                 }
-                handlerSuccessOnMain { onComplete(true) }
+                if (lat != null) {
+                    data["lat"] = lat
+                }
+                if (lng != null) {
+                    data["lng"] = lng
+                }
+
+                db.collection("service_providers").document(nextId.toString()).set(data)
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        if (task.isSuccessful) {
+                            try {
+                                NotificationHelper.scheduleNotification(
+                                    getApplication(),
+                                    "تم إضافة خدمة جديدة! 🎉",
+                                    "تم إضافة مقدم الخدمة: $name بنجاح!"
+                                )
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Notification scheduling failed", e)
+                            }
+                        }
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add service provider fail", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
@@ -641,78 +835,72 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         distanceCategory: String = "medium",
         onComplete: (Boolean) -> Unit
     ) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
-                val list = _serviceProviders.value.map { provider ->
-                    if (provider.id == providerId) {
-                        provider.copy(
-                            name = name,
-                            phone = phone,
-                            categoryId = categoryId,
-                            subCategoryId = subCategoryId,
-                            rating = rating,
-                            imageUrl = imageUrl,
-                            isActive = isActive,
-                            lat = lat,
-                            lng = lng,
-                            priceCategory = priceCategory,
-                            distanceCategory = distanceCategory
-                        )
-                    } else {
-                        provider
+                val data = mutableMapOf<String, Any?>(
+                    "name" to name,
+                    "phone" to phone,
+                    "category_id" to categoryId,
+                    "sub_category_id" to subCategoryId,
+                    "rating" to rating,
+                    "image_url" to imageUrl,
+                    "is_active" to isActive,
+                    "lat" to lat,
+                    "lng" to lng,
+                    "price_category" to priceCategory,
+                    "distance_category" to distanceCategory
+                )
+
+                db.collection("service_providers").document(providerId.toString()).set(data, com.google.firebase.firestore.SetOptions.merge())
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
                     }
-                }
-                _serviceProviders.value = list
-                saveServiceProviders()
-                handlerSuccessOnMain { onComplete(true) }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Update provider failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     fun deleteServiceProvider(providerId: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
-                val list = _serviceProviders.value.filter { it.id != providerId }
-                _serviceProviders.value = list
-                saveServiceProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("service_providers").document(providerId.toString()).delete()
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Delete provider failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }
 
     // PENDING PROVIDERS (REGISTRATION REQUESTS)
     fun addPendingProvider(name: String, phone: String, categoryId: Int, region: String, imageUrl: String?, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
                 val id = java.util.UUID.randomUUID().toString()
-                val pending = PendingProvider(
-                    id = id,
-                    name = name,
-                    phone = phone,
-                    categoryId = categoryId,
-                    region = region,
-                    imageUrl = imageUrl,
-                    status = "pending",
-                    createdAt = System.currentTimeMillis().toString()
+                val data = mapOf(
+                    "id" to id,
+                    "name" to name,
+                    "phone" to phone,
+                    "category_id" to categoryId,
+                    "region" to region,
+                    "image_url" to imageUrl,
+                    "status" to "pending",
+                    "created_at" to System.currentTimeMillis().toString()
                 )
-
-                val list = _pendingProviders.value.toMutableList()
-                list.add(pending)
-                _pendingProviders.value = list
-                savePendingProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("pending_providers").document(id).set(data)
+                    .addOnCompleteListener { task ->
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add pending provider fail", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -721,41 +909,45 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun approvePendingProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             try {
                 val nextId = (_serviceProviders.value.mapNotNull { it.id }.maxOrNull() ?: 2000) + 1
-                val provider = ServiceProvider(
-                    id = nextId,
-                    name = pending.name,
-                    phone = pending.phone,
-                    categoryId = pending.categoryId,
-                    rating = 5.0,
-                    imageUrl = pending.imageUrl ?: "",
-                    isActive = true,
-                    createdAt = System.currentTimeMillis().toString()
+                val providerData = mapOf(
+                    "id" to nextId,
+                    "name" to pending.name,
+                    "phone" to pending.phone,
+                    "category_id" to pending.categoryId,
+                    "rating" to 5.0,
+                    "image_url" to (pending.imageUrl ?: ""),
+                    "is_active" to true,
+                    "created_at" to System.currentTimeMillis().toString()
                 )
 
-                val providersList = _serviceProviders.value.toMutableList()
-                providersList.add(provider)
-                _serviceProviders.value = providersList
-                saveServiceProviders()
+                db.collection("service_providers").document(nextId.toString()).set(providerData)
+                    .addOnCompleteListener { parentTask ->
+                        if (parentTask.isSuccessful) {
+                            try {
+                                NotificationHelper.scheduleNotification(
+                                    getApplication(),
+                                    "تهانينا! تم تفعيل حسابك 🏆",
+                                    "مرحباً بك ${pending.name}، تم الموافقة على انضمامك كمهني!"
+                                )
+                            } catch (e: Exception) {
+                                Log.e("DaliliViewModel", "Approval notification failed", e)
+                            }
 
-                try {
-                    NotificationHelper.scheduleNotification(
-                        getApplication(),
-                        "تهانينا! تم تفعيل حسابك 🏆",
-                        "مرحباً بك ${pending.name}، تم الموافقة على انضمامك كمهني!"
-                    )
-                } catch (e: Exception) {
-                    Log.e("DaliliViewModel", "Approval notification failed", e)
-                }
-
-                if (pending.id != null) {
-                    val pendingList = _pendingProviders.value.filter { it.id != pending.id }
-                    _pendingProviders.value = pendingList
-                    savePendingProviders()
-                }
-                handlerSuccessOnMain { onComplete(true) }
+                            if (pending.id != null) {
+                                db.collection("pending_providers").document(pending.id).delete()
+                                    .addOnCompleteListener { deleteTask ->
+                                        handlerSuccessOnMain { onComplete(deleteTask.isSuccessful) }
+                                    }
+                            } else {
+                                handlerSuccessOnMain { onComplete(true) }
+                            }
+                        } else {
+                            handlerSuccessOnMain { onComplete(false) }
+                        }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Approve pending failed", e)
                 handlerSuccessOnMain { onComplete(false) }
@@ -764,12 +956,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun rejectPendingProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             if (pending.id != null) {
-                val pendingList = _pendingProviders.value.filter { it.id != pending.id }
-                _pendingProviders.value = pendingList
-                savePendingProviders()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("pending_providers").document(pending.id).delete()
+                    .addOnCompleteListener { task ->
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } else {
                 handlerSuccessOnMain { onComplete(false) }
             }
@@ -1068,28 +1260,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addSubCategory(parentCategoryId: Int, nameAr: String, icon: String, orderIndex: Int, onComplete: (Boolean) -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch {
             _isLoading.value = true
             try {
                 val nextId = (_subCategories.value.mapNotNull { it.id }.maxOfOrNull { it } ?: 5000) + 1
-                val subCat = SubCategory(
-                    id = nextId,
-                    parentCategoryId = parentCategoryId,
-                    nameAr = nameAr,
-                    icon = icon,
-                    orderIndex = orderIndex,
-                    createdAt = System.currentTimeMillis().toString()
+                val data = mapOf(
+                    "id" to nextId,
+                    "parent_category_id" to parentCategoryId,
+                    "name_ar" to nameAr,
+                    "icon" to icon,
+                    "order_index" to orderIndex,
+                    "created_at" to System.currentTimeMillis().toString()
                 )
-                val list = _subCategories.value.toMutableList()
-                list.add(subCat)
-                _subCategories.value = list
-                saveSubCategories()
-                handlerSuccessOnMain { onComplete(true) }
+                db.collection("subcategories").document(nextId.toString()).set(data)
+                    .addOnCompleteListener { task ->
+                        _isLoading.value = false
+                        handlerSuccessOnMain { onComplete(task.isSuccessful) }
+                    }
             } catch (e: Exception) {
                 Log.e("DaliliViewModel", "Add subcategory failed", e)
-                handlerSuccessOnMain { onComplete(false) }
-            } finally {
                 _isLoading.value = false
+                handlerSuccessOnMain { onComplete(false) }
             }
         }
     }

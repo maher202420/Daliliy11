@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "10499647772",
+    "project_id": "yemen-da",
+    "storage_bucket": "yemen-da.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:10499647772:android:2e17b3c6b0c7bdae9e32d9",
+        "android_client_info": {
+          "package_name": "com.yemende"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBoFpZzhWBpwhYwnlfcPehoUp5HfU4DTGc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
