@@ -103,6 +103,81 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _assistantWelcomeText = MutableStateFlow("مرحباً بك! أنا مساعدك الذكي في تطبيق دليلي. كيف يمكنني مساعدتك في العثور على مقدمي الخدمات اليوم؟")
     val assistantWelcomeText: StateFlow<String> = _assistantWelcomeText
 
+    // Custom properties: Top Bar Action Customizations
+    private val _topRefreshIcon = MutableStateFlow("🔄")
+    val topRefreshIcon: StateFlow<String> = _topRefreshIcon
+    private val _topRefreshTitle = MutableStateFlow("")
+    val topRefreshTitle: StateFlow<String> = _topRefreshTitle
+    private val _topRefreshShow = MutableStateFlow(true)
+    val topRefreshShow: StateFlow<Boolean> = _topRefreshShow
+
+    private val _topLangIcon = MutableStateFlow("🌐")
+    val topLangIcon: StateFlow<String> = _topLangIcon
+    private val _topLangTitle = MutableStateFlow("")
+    val topLangTitle: StateFlow<String> = _topLangTitle
+    private val _topLangShow = MutableStateFlow(true)
+    val topLangShow: StateFlow<Boolean> = _topLangShow
+
+    private val _topDarkIcon = MutableStateFlow("🌙")
+    val topDarkIcon: StateFlow<String> = _topDarkIcon
+    private val _topDarkTitle = MutableStateFlow("")
+    val topDarkTitle: StateFlow<String> = _topDarkTitle
+    private val _topDarkShow = MutableStateFlow(true)
+    val topDarkShow: StateFlow<Boolean> = _topDarkShow
+
+    private val _topAdminIcon = MutableStateFlow("⚙️")
+    val topAdminIcon: StateFlow<String> = _topAdminIcon
+    private val _topAdminTitle = MutableStateFlow("")
+    val topAdminTitle: StateFlow<String> = _topAdminTitle
+    private val _topAdminShow = MutableStateFlow(true)
+    val topAdminShow: StateFlow<Boolean> = _topAdminShow
+
+    private val _topRegIcon = MutableStateFlow("👤")
+    val topRegIcon: StateFlow<String> = _topRegIcon
+    private val _topRegTitle = MutableStateFlow("")
+    val topRegTitle: StateFlow<String> = _topRegTitle
+    private val _topRegShow = MutableStateFlow(true)
+    val topRegShow: StateFlow<Boolean> = _topRegShow
+
+    private val _topHomeIcon = MutableStateFlow("🏠")
+    val topHomeIcon: StateFlow<String> = _topHomeIcon
+    private val _topHomeTitle = MutableStateFlow("")
+    val topHomeTitle: StateFlow<String> = _topHomeTitle
+    private val _topHomeShow = MutableStateFlow(true)
+    val topHomeShow: StateFlow<Boolean> = _topHomeShow
+
+    // Custom themes (e.g., Cosmic Slate, Charcoal Gold, Royal Emerald, etc.)
+    private val _themePreset = MutableStateFlow("cosmic_slate")
+    val themePreset: StateFlow<String> = _themePreset
+    private val _themeFontColor = MutableStateFlow("#FFFFFF")
+    val themeFontColor: StateFlow<String> = _themeFontColor
+
+    // AI customizer params
+    private val _aiBtnSize = MutableStateFlow(48)
+    val aiBtnSize: StateFlow<Int> = _aiBtnSize
+    private val _aiBtnColor = MutableStateFlow("#3F51B5")
+    val aiBtnColor: StateFlow<String> = _aiBtnColor
+    private val _aiBtnPosition = MutableStateFlow("bottom_right")
+    val aiBtnPosition: StateFlow<String> = _aiBtnPosition
+    private val _aiBtnText = MutableStateFlow("خدمات")
+    val aiBtnText: StateFlow<String> = _aiBtnText
+
+    // Welcome block styling parameters
+    private val _welcomeTextSize = MutableStateFlow(16)
+    val welcomeTextSize: StateFlow<Int> = _welcomeTextSize
+    private val _welcomeTextColor = MutableStateFlow("#FFFFFF")
+    val welcomeTextColor: StateFlow<String> = _welcomeTextColor
+
+    // Commercial ads
+    private val _adTitle = MutableStateFlow("إعلانات دليلي")
+    val adTitle: StateFlow<String> = _adTitle
+    private val _adMessage = MutableStateFlow("دليلي اليمن - كل ما تبحث عنه في مكان واحد!")
+    val adMessage: StateFlow<String> = _adMessage
+    private val _adLink = MutableStateFlow("https://dalili.ye")
+    val adLink: StateFlow<String> = _adLink
+    private val _adImageUrl = MutableStateFlow("")
+    val adImageUrl: StateFlow<String> = _adImageUrl
+
     // Preferences & state
     private val _language = MutableStateFlow("ar") // "ar" or "en"
     val language: StateFlow<String> = _language
@@ -147,11 +222,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         nameAr = doc.getString("nameAr") ?: doc.getString("name_ar") ?: "",
                         icon = doc.getString("icon") ?: "",
                         orderIndex = (doc.get("orderIndex") ?: doc.get("order_index"))?.toString()?.toDoubleOrNull()?.toInt() ?: 0,
+                        isPinned = doc.getBoolean("isPinned") ?: doc.getBoolean("pinned") ?: false,
                         createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
                     )
                 } catch (ex: Exception) { null }
             } ?: emptyList()
-            _categories.value = list.sortedBy { it.orderIndex }
+            _categories.value = list.sortedWith(compareByDescending<Category> { it.isPinned }.thenBy { it.orderIndex })
             if (list.isEmpty()) {
                 seedInitialDatabase()
             }
@@ -191,11 +267,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         idCardUrl = doc.getString("idCardUrl") ?: doc.getString("id_card_url"),
                         isActive = doc.getBoolean("isActive") ?: doc.getBoolean("active") ?: true,
                         isPinned = doc.getBoolean("isPinned") ?: doc.getBoolean("pinned") ?: false,
+                        isPinnedToSearch = doc.getBoolean("isPinnedToSearch") ?: false,
+                        isPinnedToCategory = doc.getBoolean("isPinnedToCategory") ?: false,
                         isRecommended = doc.getBoolean("isRecommended") ?: doc.getBoolean("recommended") ?: false,
                         lat = doc.get("lat")?.toString()?.toDoubleOrNull(),
                         lng = doc.get("lng")?.toString()?.toDoubleOrNull(),
                         priceCategory = doc.getString("priceCategory") ?: doc.getString("price_category") ?: "medium",
                         distanceCategory = doc.getString("distanceCategory") ?: doc.getString("distance_category") ?: "near",
+                        workplaceAddress = doc.getString("workplaceAddress") ?: "",
+                        residenceArea = doc.getString("residenceArea") ?: "",
                         createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
                     )
                 } catch (ex: Exception) { null }
@@ -218,6 +298,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         idCardUrl = doc.getString("idCardUrl") ?: doc.getString("id_card_url"),
                         status = doc.getString("status") ?: "pending",
                         region = doc.getString("region") ?: "",
+                        workplaceAddress = doc.getString("workplaceAddress") ?: "",
+                        residenceArea = doc.getString("residenceArea") ?: "",
+                        lat = doc.get("lat")?.toString()?.toDoubleOrNull(),
+                        lng = doc.get("lng")?.toString()?.toDoubleOrNull(),
                         createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
                     )
                 } catch (ex: Exception) { null }
@@ -253,13 +337,27 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         username = doc.getString("username") ?: "",
                         passwordHash = doc.getString("passwordHash") ?: doc.getString("password_hash") ?: "",
                         role = doc.getString("role") ?: "admin",
+                        canApprove = doc.getBoolean("canApprove") ?: true,
+                        canAddProviders = doc.getBoolean("canAddProviders") ?: true,
+                        canEditSettings = doc.getBoolean("canEditSettings") ?: false,
+                        canManageCategories = doc.getBoolean("canManageCategories") ?: false,
                         createdAt = doc.getString("created_at") ?: doc.getString("createdAt")
                     )
                 } catch (ex: Exception) { null }
             } ?: emptyList()
             _admins.value = list
             if (list.none { it.username.equals("admin", ignoreCase = true) }) {
-                val seedAdmin1 = Admin("admin", "admin", hashPasswordHelper("maher736462"), "super_admin", Date().toString())
+                val seedAdmin1 = Admin(
+                    id = "admin",
+                    username = "admin",
+                    passwordHash = hashPasswordHelper("maher736462"),
+                    role = "super_admin",
+                    createdAt = Date().toString(),
+                    canApprove = true,
+                    canAddProviders = true,
+                    canEditSettings = true,
+                    canManageCategories = true
+                )
                 db.collection("admins").document("admin").set(seedAdmin1)
             }
         }
@@ -292,13 +390,64 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             _themeColorHex.value = doc.getString("theme_primary_color") ?: "#3F51B5"
             val colorsCsv = doc.getString("available_colors_csv") ?: "#3F51B5,#2196F3,#00E676,#FF9800,#E91E63,#9C27B0"
             _availableColors.value = colorsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+            // Dynamic header customization
+            _topRefreshIcon.value = doc.getString("top_refresh_icon") ?: "🔄"
+            _topRefreshTitle.value = doc.getString("top_refresh_title") ?: ""
+            _topRefreshShow.value = doc.getBoolean("top_refresh_show") ?: true
+
+            _topLangIcon.value = doc.getString("top_lang_icon") ?: "🌐"
+            _topLangTitle.value = doc.getString("top_lang_title") ?: ""
+            _topLangShow.value = doc.getBoolean("top_lang_show") ?: true
+
+            _topDarkIcon.value = doc.getString("top_dark_icon") ?: "🌙"
+            _topDarkTitle.value = doc.getString("top_dark_title") ?: ""
+            _topDarkShow.value = doc.getBoolean("top_dark_show") ?: true
+
+            _topAdminIcon.value = doc.getString("top_admin_icon") ?: "⚙️"
+            _topAdminTitle.value = doc.getString("top_admin_title") ?: ""
+            _topAdminShow.value = doc.getBoolean("top_admin_show") ?: true
+
+            _topRegIcon.value = doc.getString("top_reg_icon") ?: "👤"
+            _topRegTitle.value = doc.getString("top_reg_title") ?: ""
+            _topRegShow.value = doc.getBoolean("top_reg_show") ?: true
+
+            _topHomeIcon.value = doc.getString("top_home_icon") ?: "🏠"
+            _topHomeTitle.value = doc.getString("top_home_title") ?: ""
+            _topHomeShow.value = doc.getBoolean("top_home_show") ?: true
+
+            _themePreset.value = doc.getString("theme_preset") ?: "cosmic_slate"
+            _themeFontColor.value = doc.getString("theme_font_color") ?: "#FFFFFF"
+
+            _aiBtnSize.value = doc.getLong("ai_btn_size")?.toInt() ?: 48
+            _aiBtnColor.value = doc.getString("ai_btn_color") ?: "#3F51B5"
+            _aiBtnPosition.value = doc.getString("ai_btn_position") ?: "bottom_right"
+            _aiBtnText.value = doc.getString("ai_btn_text") ?: "خدمات"
+
+            _welcomeTextSize.value = doc.getLong("welcome_text_size")?.toInt() ?: 16
+            _welcomeTextColor.value = doc.getString("welcome_text_color") ?: "#FFFFFF"
+
+            _adTitle.value = doc.getString("ad_title") ?: "إعلانات دليلي"
+            _adMessage.value = doc.getString("ad_message") ?: "دليلي اليمن - كل ما تبحث عنه في مكان واحد!"
+            _adLink.value = doc.getString("ad_link") ?: "https://dalili.ye"
+            _adImageUrl.value = doc.getString("ad_image_url") ?: ""
         }
     }
 
     fun login(username: String, pwhash: String): Boolean {
         // Support both direct plain text comparison and SHA comparison
         if (username.equals("admin", ignoreCase = true) && pwhash == "maher736462") {
-            _currentUser.value = Admin("admin", "admin", hashPasswordHelper("maher736462"), "super_admin", Date().toString())
+            _currentUser.value = Admin(
+                id = "admin",
+                username = "admin",
+                passwordHash = hashPasswordHelper("maher736462"),
+                role = "super_admin",
+                createdAt = Date().toString(),
+                canApprove = true,
+                canAddProviders = true,
+                canEditSettings = true,
+                canManageCategories = true
+            )
             return true
         }
         val hashValue = hashPasswordHelper(pwhash)
@@ -356,6 +505,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         updatesUrl: String,
         shareText: String,
         welcomeImg: String,
+        topBarSettings: Map<String, Any> = emptyMap(),
         onComplete: (Boolean) -> Unit
     ) {
         val data = hashMapOf<String, Any>(
@@ -375,6 +525,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             "app_updates_url" to updatesUrl,
             "app_share_text" to shareText
         )
+        // Add extra settings to save
+        data.putAll(topBarSettings)
 
         db.collection("app_config").document("global").set(data, SetOptions.merge())
             .addOnCompleteListener { task ->
@@ -382,10 +534,17 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             }
     }
 
-    fun addCategory(nameAr: String, icon: String, orderIndex: Int, onComplete: (Boolean) -> Unit) {
+    fun addCategory(nameAr: String, icon: String, orderIndex: Int, isPinned: Boolean, onComplete: (Boolean) -> Unit) {
         val maxId = categories.value.maxOfOrNull { it.id ?: 0 } ?: 0
         val newId = maxId + 1
-        val item = Category(newId, nameAr, icon, orderIndex, Date().toString())
+        val item = Category(
+            id = newId,
+            nameAr = nameAr,
+            icon = icon,
+            orderIndex = orderIndex,
+            createdAt = Date().toString(),
+            isPinned = isPinned
+        )
         db.collection("categories").document(newId.toString()).set(item)
             .addOnCompleteListener { task ->
                 onComplete(task.isSuccessful)
@@ -409,8 +568,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addServiceProvider(
         name: String, phone: String, categoryId: Int, subCategoryId: Int?,
-        imageUrl: String?, idCardUrl: String?, isPinned: Boolean, isRecommended: Boolean,
-        priceCategory: String?, distanceCategory: String?, onComplete: (Boolean) -> Unit
+        imageUrl: String?, idCardUrl: String?, isPinned: Boolean, isPinnedToSearch: Boolean,
+        isPinnedToCategory: Boolean, isRecommended: Boolean, priceCategory: String?,
+        distanceCategory: String?, workplaceAddress: String = "", residenceArea: String = "",
+        lat: Double? = null, lng: Double? = null, onComplete: (Boolean) -> Unit
     ) {
         val maxId = serviceProviders.value.maxOfOrNull { it.id ?: 0 } ?: 0
         val newId = maxId + 1
@@ -425,9 +586,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             idCardUrl = idCardUrl,
             isActive = true,
             isPinned = isPinned,
+            isPinnedToSearch = isPinnedToSearch,
+            isPinnedToCategory = isPinnedToCategory,
             isRecommended = isRecommended,
+            lat = lat,
+            lng = lng,
             priceCategory = priceCategory ?: "medium",
             distanceCategory = distanceCategory ?: "near",
+            workplaceAddress = workplaceAddress,
+            residenceArea = residenceArea,
             createdAt = Date().toString()
         )
         db.collection("service_providers").document(newId.toString()).set(item)
@@ -476,7 +643,9 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addPendingProvider(
         name: String, phone: String, categoryId: Int, subCategoryId: Int?,
-        imageUrl: String?, idCardUrl: String?, region: String?, onComplete: (Boolean) -> Unit
+        imageUrl: String?, idCardUrl: String?, region: String?,
+        workplaceAddress: String = "", residenceArea: String = "", lat: Double? = null, lng: Double? = null,
+        onComplete: (Boolean) -> Unit
     ) {
         val docId = db.collection("pending_providers").document().id
         val item = PendingProvider(
@@ -489,6 +658,10 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             idCardUrl = idCardUrl,
             status = "pending",
             region = region ?: "",
+            workplaceAddress = workplaceAddress,
+            residenceArea = residenceArea,
+            lat = lat,
+            lng = lng,
             createdAt = Date().toString()
         )
         db.collection("pending_providers").document(docId).set(item)
@@ -510,9 +683,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                         imageUrl = pending.imageUrl,
                         idCardUrl = pending.idCardUrl,
                         isPinned = false,
+                        isPinnedToSearch = false,
+                        isPinnedToCategory = false,
                         isRecommended = false,
                         priceCategory = "medium",
-                        distanceCategory = "near"
+                        distanceCategory = "near",
+                        workplaceAddress = pending.workplaceAddress,
+                        residenceArea = pending.residenceArea,
+                        lat = pending.lat,
+                        lng = pending.lng
                     ) { success ->
                         onComplete(success)
                     }
@@ -525,6 +704,45 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     fun rejectPendingProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
         val id = pending.id ?: return
         db.collection("pending_providers").document(id).update("status", "rejected")
+            .addOnCompleteListener { task ->
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    fun addSupervisor(
+        username: String, pwhash: String, role: String,
+        canApprove: Boolean, canAddProviders: Boolean,
+        canEditSettings: Boolean, canManageCategories: Boolean,
+        onComplete: (Boolean) -> Unit
+    ) {
+        val docId = username.lowercase()
+        val item = Admin(
+            id = docId,
+            username = username,
+            passwordHash = hashPasswordHelper(pwhash),
+            role = role,
+            canApprove = canApprove,
+            canAddProviders = canAddProviders,
+            canEditSettings = canEditSettings,
+            canManageCategories = canManageCategories,
+            createdAt = Date().toString()
+        )
+        db.collection("admins").document(docId).set(item)
+            .addOnCompleteListener { task ->
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    fun updateSupervisor(admin: Admin, onComplete: (Boolean) -> Unit) {
+        val id = admin.id ?: return
+        db.collection("admins").document(id).set(admin)
+            .addOnCompleteListener { task ->
+                onComplete(task.isSuccessful)
+            }
+    }
+
+    fun deleteSupervisor(id: String, onComplete: (Boolean) -> Unit) {
+        db.collection("admins").document(id).delete()
             .addOnCompleteListener { task ->
                 onComplete(task.isSuccessful)
             }

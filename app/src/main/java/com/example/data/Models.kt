@@ -5,7 +5,8 @@ data class Category(
     val nameAr: String = "",
     val icon: String = "",
     val orderIndex: Int = 0,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val isPinned: Boolean = false
 )
 
 data class SubCategory(
@@ -33,7 +34,12 @@ data class ServiceProvider(
     val lng: Double? = null,
     val priceCategory: String? = "medium",
     val distanceCategory: String? = "near",
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    // New parameters appended at the end
+    val isPinnedToSearch: Boolean = false,
+    val isPinnedToCategory: Boolean = false,
+    val workplaceAddress: String = "",
+    val residenceArea: String = ""
 )
 
 data class PendingProvider(
@@ -46,7 +52,12 @@ data class PendingProvider(
     val idCardUrl: String? = null,
     val status: String = "pending",
     val region: String? = "",
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    // New parameters appended at the end
+    val workplaceAddress: String = "",
+    val residenceArea: String = "",
+    val lat: Double? = null,
+    val lng: Double? = null
 )
 
 data class Review(
@@ -63,5 +74,10 @@ data class Admin(
     val username: String = "",
     val passwordHash: String = "",
     val role: String = "admin",
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    // New parameters appended at the end
+    val canApprove: Boolean = true,
+    val canAddProviders: Boolean = true,
+    val canEditSettings: Boolean = false,
+    val canManageCategories: Boolean = false
 )

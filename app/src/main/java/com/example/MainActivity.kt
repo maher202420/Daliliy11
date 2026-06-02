@@ -67,6 +67,39 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Composable
+fun TopBarActionButton(
+    icon: String,
+    title: String,
+    show: Boolean,
+    onClick: () -> Unit
+) {
+    if (!show) return
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .minimumInteractiveComponentSize()
+    ) {
+        Text(
+            text = icon,
+            fontSize = 20.sp,
+            color = Color.White
+        )
+        if (title.isNotEmpty()) {
+            Text(
+                text = title,
+                fontSize = 9.sp,
+                color = Color.White.copy(alpha = 0.82f),
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainAppContainer(viewModel: DaliliViewModel) {
@@ -77,6 +110,31 @@ fun MainAppContainer(viewModel: DaliliViewModel) {
     // Config values
     val appName by viewModel.appName.collectAsState()
     val themeColorHex by viewModel.themeColorHex.collectAsState()
+    
+    // Top Bar Customization Configs
+    val topRefreshIcon by viewModel.topRefreshIcon.collectAsState()
+    val topRefreshTitle by viewModel.topRefreshTitle.collectAsState()
+    val topRefreshShow by viewModel.topRefreshShow.collectAsState()
+
+    val topLangIcon by viewModel.topLangIcon.collectAsState()
+    val topLangTitle by viewModel.topLangTitle.collectAsState()
+    val topLangShow by viewModel.topLangShow.collectAsState()
+
+    val topDarkIcon by viewModel.topDarkIcon.collectAsState()
+    val topDarkTitle by viewModel.topDarkTitle.collectAsState()
+    val topDarkShow by viewModel.topDarkShow.collectAsState()
+
+    val topAdminIcon by viewModel.topAdminIcon.collectAsState()
+    val topAdminTitle by viewModel.topAdminTitle.collectAsState()
+    val topAdminShow by viewModel.topAdminShow.collectAsState()
+
+    val topRegIcon by viewModel.topRegIcon.collectAsState()
+    val topRegTitle by viewModel.topRegTitle.collectAsState()
+    val topRegShow by viewModel.topRegShow.collectAsState()
+
+    val topHomeIcon by viewModel.topHomeIcon.collectAsState()
+    val topHomeTitle by viewModel.topHomeTitle.collectAsState()
+    val topHomeShow by viewModel.topHomeShow.collectAsState()
     
     // Parse primary theme color safely
     val primaryColor = remember(themeColorHex) {
@@ -115,60 +173,78 @@ fun MainAppContainer(viewModel: DaliliViewModel) {
                             )
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color(0xFF1A1A1E)
+                            containerColor = Color(0xFF1E1E22)
                         ),
                         actions = {
                             // 1. 🔄 (Circular arrow) → refresh page / sync database
-                            IconButton(onClick = {
-                                Toast.makeText(context, if(lang == "ar") "جاري تحديث البيانات..." else "Refreshing data...", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White)
-                            }
+                            TopBarActionButton(
+                                icon = topRefreshIcon.ifEmpty { "🔄" },
+                                title = topRefreshTitle,
+                                show = topRefreshShow,
+                                onClick = {
+                                    Toast.makeText(context, if(lang == "ar") "جاري تحديث البيانات..." else "Refreshing data...", Toast.LENGTH_SHORT).show()
+                                }
+                            )
                             
                             // 2. 🌐 (Globe) → Switch Language
-                            IconButton(onClick = {
-                                viewModel.toggleLanguage()
-                            }) {
-                                Icon(Icons.Default.Language, contentDescription = "Language", tint = Color.White)
-                            }
+                            TopBarActionButton(
+                                icon = topLangIcon.ifEmpty { "🌐" },
+                                title = topLangTitle,
+                                show = topLangShow,
+                                onClick = {
+                                    viewModel.toggleLanguage()
+                                }
+                            )
                             
-                            // 3. 🌙 (Moon) → Switch Dark Mode (Contrast toggle)
-                            IconButton(onClick = {
-                                viewModel.toggleDarkMode()
-                                Toast.makeText(context, if(lang == "ar") "تم تبديل تباين الوضع الليلي" else "Night mode toggled", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(Icons.Default.DarkMode, contentDescription = "Dark Mode", tint = Color.White)
-                            }
+                            // 3. 🌙 (Moon) → Switch Dark Mode
+                            TopBarActionButton(
+                                icon = topDarkIcon.ifEmpty { "🌙" },
+                                title = topDarkTitle,
+                                show = topDarkShow,
+                                onClick = {
+                                    viewModel.toggleDarkMode()
+                                    Toast.makeText(context, if(lang == "ar") "تم تبديل تباين الوضع الليلي" else "Night mode toggled", Toast.LENGTH_SHORT).show()
+                                }
+                            )
                             
                             // 4. ⚙️ (Gear) → enter admins panel
-                            IconButton(onClick = {
-                                if (viewModel.currentUser.value != null) {
-                                    currentScreenState.value = Screen.AdminDashboard
-                                } else {
-                                    currentScreenState.value = Screen.Login
+                            TopBarActionButton(
+                                icon = topAdminIcon.ifEmpty { "⚙️" },
+                                title = topAdminTitle,
+                                show = topAdminShow,
+                                onClick = {
+                                    if (viewModel.currentUser.value != null) {
+                                        currentScreenState.value = Screen.AdminDashboard
+                                    } else {
+                                        currentScreenState.value = Screen.Login
+                                    }
                                 }
-                            }) {
-                                Icon(Icons.Default.Settings, contentDescription = "Admin", tint = Color.White)
-                            }
+                            )
                             
                             // 5. 👤 (User icon) → Provider registration
-                            IconButton(onClick = {
-                                currentScreenState.value = Screen.ProviderRegister
-                            }) {
-                                Icon(Icons.Default.Person, contentDescription = "Provider Registration", tint = Color.White)
-                            }
+                            TopBarActionButton(
+                                icon = topRegIcon.ifEmpty { "👤" },
+                                title = topRegTitle,
+                                show = topRegShow,
+                                onClick = {
+                                    currentScreenState.value = Screen.ProviderRegister
+                                }
+                            )
                             
                             // 6. 🏠 (Home logo) → Backdoor portal (Tapping 5 times triggers "maher--736462")
-                            IconButton(onClick = {
-                                currentScreenState.value = Screen.Home
-                                backdoorTapCount++
-                                if (backdoorTapCount >= 5) {
-                                    backdoorTapCount = 0
-                                    showBackdoorDialog = true
+                            TopBarActionButton(
+                                icon = topHomeIcon.ifEmpty { "🏠" },
+                                title = topHomeTitle,
+                                show = topHomeShow,
+                                onClick = {
+                                    currentScreenState.value = Screen.Home
+                                    backdoorTapCount++
+                                    if (backdoorTapCount >= 5) {
+                                        backdoorTapCount = 0
+                                        showBackdoorDialog = true
+                                    }
                                 }
-                            }) {
-                                Icon(Icons.Default.Home, contentDescription = "Home App", tint = primaryColor)
-                            }
+                            )
                         }
                     )
                 }
@@ -286,6 +362,55 @@ fun MainAppContainer(viewModel: DaliliViewModel) {
 }
 
 @Composable
+fun InfoAboutAppDialog(viewModel: DaliliViewModel, onDismiss: () -> Unit) {
+    val name by viewModel.appName.collectAsState()
+    val phone by viewModel.phone.collectAsState()
+    val email by viewModel.email.collectAsState()
+    val adsTitle by viewModel.adTitle.collectAsState()
+    val adsMsg by viewModel.adMessage.collectAsState()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = name.ifEmpty { "حول التطبيق - About" },
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "دليلك الشامل لجميع الخدمات والأجهزة الطبية والصيانة في اليمن!",
+                    color = Color.White.copy(0.85f),
+                    fontSize = 13.sp
+                )
+                HorizontalDivider(color = Color.White.copy(0.12f))
+                Text("📞 هاتف الدعم: $phone", color = Color.White, fontSize = 13.sp)
+                Text("✉️ البريد الإلكتروني: $email", color = Color.White, fontSize = 13.sp)
+                if (adsMsg.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("📢 إعلان نشط: $adsTitle", color = Color.White.copy(0.7f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(adsMsg, color = Color.White.copy(0.9f), fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(0.15f))
+            ) {
+                Text("إغلاق", color = Color.White)
+            }
+        },
+        containerColor = Color(0xFF1E1E22),
+        titleContentColor = Color.White,
+        textContentColor = Color.White
+    )
+}
+
+@Composable
 fun AppFooterSection(
     viewModel: DaliliViewModel,
     primaryColor: Color,
@@ -297,8 +422,19 @@ fun AppFooterSection(
     val showAiIcon by viewModel.showAiIcon.collectAsState()
     val aiIconSymbol by viewModel.aiIcon.collectAsState()
 
+    val aiBtnSize by viewModel.aiBtnSize.collectAsState()
+    val aiBtnColorHex by viewModel.aiBtnColor.collectAsState()
+    val aiBtnText by viewModel.aiBtnText.collectAsState()
+
+    var showAboutDialog by remember { mutableStateOf(false) }
+
+    val aiColor = remember(aiBtnColorHex) {
+        try { Color(android.graphics.Color.parseColor(aiBtnColorHex)) } catch(e: Exception) { primaryColor }
+    }
+    val aiSizeDp = aiBtnSize.coerceIn(24, 72).dp
+
     if (showFooter) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF1A1A1E))
@@ -309,39 +445,62 @@ fun AppFooterSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // AI Assistant Icon (Bottom Left of Footer)
+                // LEFT: Information Icon (ℹ️)
+                IconButton(
+                    onClick = { showAboutDialog = true },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Text("ℹ️", fontSize = 20.sp, color = Color.White)
+                }
+
+                // CENTER: Footnote (e.g. MAW 777644670) 50% smaller
+                if (footerText.isNotEmpty()) {
+                    Text(
+                        text = footerText,
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+
+                // RIGHT: Dynamic AI Action Button
                 if (showAiIcon) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = primaryColor.copy(0.2f)),
+                    Row(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onAiClick() },
-                        shape = RoundedCornerShape(10.dp)
+                            .height(aiSizeDp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(aiColor)
+                            .clickable { onAiClick() }
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Text(aiIconSymbol.ifEmpty { "🤖" }, fontSize = 16.sp)
+                        if (aiBtnText.isNotEmpty()) {
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = aiIconSymbol.ifEmpty { "🤖" },
-                                fontSize = 18.sp
+                                text = aiBtnText,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
                 } else {
                     Spacer(modifier = Modifier.size(36.dp))
                 }
-
-                // Footnote "MAW 777644670" size strictly 50% smaller (normal 14sp -> 7sp or 8sp for crisp readability)
-                Text(
-                    text = footerText,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.sp,
-                    modifier = Modifier.padding(end = 6.dp)
-                )
             }
+        }
+    }
+
+    if (showAboutDialog) {
+        InfoAboutAppDialog(viewModel = viewModel) {
+            showAboutDialog = false
         }
     }
 }
@@ -353,11 +512,24 @@ fun HomeScreen(
     lang: String,
     onCategoryClick: (Category) -> Unit
 ) {
+    val context = LocalContext.current
     val categories by viewModel.categories.collectAsState()
     val serviceProviders by viewModel.serviceProviders.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    
     val welcomeText by viewModel.welcomeText.collectAsState()
     val welcomeImage by viewModel.welcomeImage.collectAsState()
+    val welcomeTextSize by viewModel.welcomeTextSize.collectAsState()
+    val welcomeTextColorHex by viewModel.welcomeTextColor.collectAsState()
+
+    val adTitle by viewModel.adTitle.collectAsState()
+    val adMessage by viewModel.adMessage.collectAsState()
+    val adLink by viewModel.adLink.collectAsState()
+    val adImageUrl by viewModel.adImageUrl.collectAsState()
+
+    val welcomeColor = remember(welcomeTextColorHex) {
+        try { Color(android.graphics.Color.parseColor(welcomeTextColorHex)) } catch (e: Exception) { Color.White }
+    }
 
     val filteredProviders = remember(searchQuery, serviceProviders) {
         if (searchQuery.isBlank()) {
@@ -366,7 +538,12 @@ fun HomeScreen(
             serviceProviders.filter {
                 it.name.contains(searchQuery, ignoreCase = true) ||
                 it.phone.contains(searchQuery)
-            }
+            }.sortedWith(
+                compareByDescending<ServiceProvider> { it.isPinnedToSearch }
+                    .thenByDescending { it.isPinned }
+                    .thenByDescending { it.isRecommended }
+                    .thenByDescending { it.rating }
+            )
         }
     }
 
@@ -376,6 +553,66 @@ fun HomeScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 1. Commercial Ads Section
+        if (adMessage.isNotEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = primaryColor.copy(0.12f)),
+                    border = BorderStroke(1.dp, primaryColor.copy(0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            try {
+                                if (adLink.isNotEmpty()) {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(adLink))
+                                    context.startActivity(intent)
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Cannot open link", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (lang == "ar") "🔥 إعلان مميز" else "🔥 Feature Ad",
+                                color = primaryColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            Text(
+                                text = adTitle.ifEmpty { "Dalili Ad" },
+                                color = Color.White.copy(0.55f),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (adImageUrl.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            AsyncImage(
+                                model = adImageUrl,
+                                contentDescription = "Ad Image",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = adMessage,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
         // Hero / Welcome Section
         item {
             Card(
@@ -394,9 +631,9 @@ fun HomeScreen(
                     )
                     Text(
                         text = welcomeText,
-                        color = Color.White,
+                        color = welcomeColor,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
+                        fontSize = welcomeTextSize.coerceIn(10, 32).sp,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
@@ -527,11 +764,17 @@ fun CategoryDetailsScreen(
     var selectedSubId by remember { mutableStateOf<Int?>(null) }
     
     val displayedProviders = remember(selectedSubId, catProviders) {
-        if (selectedSubId == null) {
+        val rawList = if (selectedSubId == null) {
             catProviders
         } else {
             catProviders.filter { it.subCategoryId == selectedSubId }
         }
+        rawList.sortedWith(
+            compareByDescending<ServiceProvider> { it.isPinnedToCategory }
+                .thenByDescending { it.isPinned }
+                .thenByDescending { it.isRecommended }
+                .thenByDescending { it.rating }
+        )
     }
 
     LazyColumn(
@@ -694,6 +937,24 @@ fun ServiceProviderRowListItem(
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
+                    if (provider.workplaceAddress.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (lang == "ar") "📍 المركز: ${provider.workplaceAddress}" else "📍 Center: ${provider.workplaceAddress}",
+                            color = Color.White.copy(0.72f),
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 11.sp
+                        )
+                    }
+                    if (provider.residenceArea.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = if (lang == "ar") "🏠 السكن: ${provider.residenceArea}" else "🏠 Area: ${provider.residenceArea}",
+                            color = Color.White.copy(0.72f),
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
 
@@ -1234,6 +1495,10 @@ fun ProviderRegisterScreen(
     var phoneInput by remember { mutableStateOf("") }
     var selectedCat by remember { mutableStateOf<Category?>(null) }
     var regionInput by remember { mutableStateOf("") }
+    var workplaceAddressInput by remember { mutableStateOf("") }
+    var residenceAreaInput by remember { mutableStateOf("") }
+    var imageUrlInput by remember { mutableStateOf("") }
+    var idCardUrlInput by remember { mutableStateOf("") }
 
     LaunchedEffect(categories) {
         if (categories.isNotEmpty() && selectedCat == null) {
@@ -1257,7 +1522,7 @@ fun ProviderRegisterScreen(
                     Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
                 Text(
-                    text = if (lang == "ar") "تسجيل أصحاب المهن والمهندسين" else "Service Provider Registration",
+                    text = if (lang == "ar") "تقديم طلب تسجيل مقدم خدمة" else "Service Provider Registration",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
@@ -1277,7 +1542,7 @@ fun ProviderRegisterScreen(
                     OutlinedTextField(
                         value = nameInput,
                         onValueChange = { nameInput = it },
-                        label = { Text(if (lang == "ar") "الاسم بالكامل (أو اسم المحل/المؤسسة)" else "Full Name / Enterprise Name", color = Color.White) },
+                        label = { Text(if (lang == "ar") "الاسم الثلاثي الكامل (لصاحب المهنة)" else "Triple Full Name", color = Color.White) },
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1285,7 +1550,7 @@ fun ProviderRegisterScreen(
                     OutlinedTextField(
                         value = phoneInput,
                         onValueChange = { phoneInput = it },
-                        label = { Text(if (lang == "ar") "رقم الهاتف للعملاء 📞" else "Active Customer Phone No", color = Color.White) },
+                        label = { Text(if (lang == "ar") "رقم الهاتف للعملاء والتواصل 📞" else "Active Customer Phone No", color = Color.White) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
@@ -1294,7 +1559,39 @@ fun ProviderRegisterScreen(
                     OutlinedTextField(
                         value = regionInput,
                         onValueChange = { regionInput = it },
-                        label = { Text(if (lang == "ar") "المنطقة / المحافظة" else "Governorate / City / Region", color = Color.White) },
+                        label = { Text(if (lang == "ar") "المحافظة والمدينة" else "Governorate / City", color = Color.White) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = workplaceAddressInput,
+                        onValueChange = { workplaceAddressInput = it },
+                        label = { Text(if (lang == "ar") "العنوان بالتفصيل / اسم المركز أو المحل التجاري 📍" else "Workplace Center Address", color = Color.White) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = residenceAreaInput,
+                        onValueChange = { residenceAreaInput = it },
+                        label = { Text(if (lang == "ar") "منطقة وأمر السكن الحالي بالتفصيل 🏠" else "Current Residence Region", color = Color.White) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = imageUrlInput,
+                        onValueChange = { imageUrlInput = it },
+                        label = { Text(if (lang == "ar") "رابط الصورة الشخصية لمقدم الخدمة (URL) 📸" else "Profile Image URL", color = Color.White) },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = idCardUrlInput,
+                        onValueChange = { idCardUrlInput = it },
+                        label = { Text(if (lang == "ar") "رابط صورة الهوية الشخصية (اختياري) 🪪" else "ID Card Photo URL (Optional)", color = Color.White) },
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1326,17 +1623,22 @@ fun ProviderRegisterScreen(
 
                     Button(
                         onClick = {
-                            if (nameInput.isBlank() || phoneInput.isBlank() || selectedCat == null) {
-                                Toast.makeText(context, "الرجاء اكمال الحقول المطلوبة", Toast.LENGTH_SHORT).show()
+                            if (nameInput.isBlank() || phoneInput.isBlank() || workplaceAddressInput.isBlank() || residenceAreaInput.isBlank() || selectedCat == null) {
+                                Toast.makeText(context, "الرجاء اكمال الحقول الإلزامية لتسجيل الطلب", Toast.LENGTH_SHORT).show()
                             } else {
+                                val finalImage = imageUrlInput.ifEmpty { "https://images.unsplash.com/photo-1521791136368-1a9b7defcad8" }
                                 viewModel.addPendingProvider(
                                     name = nameInput,
                                     phone = phoneInput,
                                     categoryId = selectedCat?.id ?: 0,
                                     subCategoryId = null,
-                                    imageUrl = "",
-                                    idCardUrl = "",
-                                    region = regionInput
+                                    imageUrl = finalImage,
+                                    idCardUrl = idCardUrlInput,
+                                    region = regionInput,
+                                    workplaceAddress = workplaceAddressInput,
+                                    residenceArea = residenceAreaInput,
+                                    lat = null,
+                                    lng = null
                                 ) { success ->
                                     if (success) {
                                         Toast.makeText(context, "تم إرسال طلبك للمشرفين بنجاح! سيتم مراجعته وتفعيله.", Toast.LENGTH_LONG).show()
@@ -1350,7 +1652,7 @@ fun ProviderRegisterScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(if (lang == "ar") "تقديم طلب التسجيل 📤" else "Submit Registration", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(if (lang == "ar") "تقديم طلب تسجيل المهنة 📤" else "Submit Registration", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
             }
