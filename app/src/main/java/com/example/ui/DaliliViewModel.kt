@@ -29,79 +29,98 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     val db: FirebaseFirestore
 
     private val _categories = MutableStateFlow<List<Category>>(emptyList())
-    private val categories: StateFlow<List<Category>> = _categories
+    val categories: StateFlow<List<Category>> = _categories
 
     private val _subCategories = MutableStateFlow<List<SubCategory>>(emptyList())
-    private val subCategories: StateFlow<List<SubCategory>> = _subCategories
+    val subCategories: StateFlow<List<SubCategory>> = _subCategories
 
     private val _serviceProviders = MutableStateFlow<List<ServiceProvider>>(emptyList())
-    private val serviceProviders: StateFlow<List<ServiceProvider>> = _serviceProviders
+    val serviceProviders: StateFlow<List<ServiceProvider>> = _serviceProviders
 
     private val _pendingProviders = MutableStateFlow<List<PendingProvider>>(emptyList())
-    private val pendingProviders: StateFlow<List<PendingProvider>> = _pendingProviders
+    val pendingProviders: StateFlow<List<PendingProvider>> = _pendingProviders
 
     private val _reviews = MutableStateFlow<List<Review>>(emptyList())
-    private val reviews: StateFlow<List<Review>> = _reviews
+    val reviews: StateFlow<List<Review>> = _reviews
 
     private val _admins = MutableStateFlow<List<Admin>>(emptyList())
-    private val admins: StateFlow<List<Admin>> = _admins
+    val admins: StateFlow<List<Admin>> = _admins
 
     private val _currentUser = MutableStateFlow<Admin?>(null)
-    private val currentUser: StateFlow<Admin?> = _currentUser
+    val currentUser: StateFlow<Admin?> = _currentUser
 
-    // Global configurations
-    private val _themeChoice = MutableStateFlow("slate")
-    private val themeChoice: StateFlow<String> = _themeChoice
+    // Global configurations (Synchronized in real-time with Firestore)
+    private val _themeColorHex = MutableStateFlow("#3F51B5") // Default Indigo, admin can add/modify
+    val themeColorHex: StateFlow<String> = _themeColorHex
+
+    private val _availableColors = MutableStateFlow(listOf("#3F51B5", "#2196F3", "#00E676", "#FF9800", "#E91E63", "#9C27B0"))
+    val availableColors: StateFlow<List<String>> = _availableColors
 
     private val _appName = MutableStateFlow("دليلي - Dalili")
-    private val appName: StateFlow<String> = _appName
+    val appName: StateFlow<String> = _appName
 
     private val _welcomeText = MutableStateFlow("دليلي - دليلك الشامل لجميع الخدمات والأجهزة الطبية والصيانة في اليمن!")
-    private val welcomeText: StateFlow<String> = _welcomeText
+    val welcomeText: StateFlow<String> = _welcomeText
 
-    private val _welcomeImage = MutableStateFlow("")
-    private val welcomeImage: StateFlow<String> = _welcomeImage
+    private val _welcomeImage = MutableStateFlow("https://images.unsplash.com/photo-1576091160399-112ba8d25d1d")
+    val welcomeImage: StateFlow<String> = _welcomeImage
 
     private val _appLogo = MutableStateFlow("")
-    private val appLogo: StateFlow<String> = _appLogo
+    val appLogo: StateFlow<String> = _appLogo
 
     private val _phone = MutableStateFlow("777644670")
-    private val phone: StateFlow<String> = _phone
+    val phone: StateFlow<String> = _phone
 
     private val _email = MutableStateFlow("support@dalili.ye")
-    private val email: StateFlow<String> = _email
+    val email: StateFlow<String> = _email
 
     private val _whatsapp = MutableStateFlow("777644670")
-    private val whatsapp: StateFlow<String> = _whatsapp
+    val whatsapp: StateFlow<String> = _whatsapp
 
-    private val _footer = MutableStateFlow("جميع الحقوق محفوظة © تطبيق دليلي 2026")
-    private val footer: StateFlow<String> = _footer
+    // Footers
+    private val _footer = MutableStateFlow("MAW 777644670")
+    val footer: StateFlow<String> = _footer
 
     private val _showFooter = MutableStateFlow(true)
-    private val showFooter: StateFlow<Boolean> = _showFooter
+    val showFooter: StateFlow<Boolean> = _showFooter
 
     private val _aboutAppSubtitle = MutableStateFlow("دليلي هو منصة الكترونية شاملة ومجانية تهدف لتسهيل الوصول لمزودي الخدمات الهندسية، الطبية والاتصالات في جميع مناطق الجمهورية.")
-    private val aboutAppSubtitle: StateFlow<String> = _aboutAppSubtitle
+    val aboutAppSubtitle: StateFlow<String> = _aboutAppSubtitle
 
     private val _appUpdatesUrl = MutableStateFlow("https://dalili.ye/updates")
-    private val appUpdatesUrl: StateFlow<String> = _appUpdatesUrl
+    val appUpdatesUrl: StateFlow<String> = _appUpdatesUrl
 
     private val _appShareText = MutableStateFlow("حمل الآن تطبيق دليلي للأجهزة والخدمات، دليلك في جيبك!")
-    private val appShareText: StateFlow<String> = _appShareText
+    val appShareText: StateFlow<String> = _appShareText
+
+    // AI Configuration
+    private val _showAiIcon = MutableStateFlow(true)
+    val showAiIcon: StateFlow<Boolean> = _showAiIcon
+
+    private val _aiIcon = MutableStateFlow("🤖")
+    val aiIcon: StateFlow<String> = _aiIcon
 
     private val _assistantWelcomeText = MutableStateFlow("مرحباً بك! أنا مساعدك الذكي في تطبيق دليلي. كيف يمكنني مساعدتك في العثور على مقدمي الخدمات اليوم؟")
-    private val assistantWelcomeText: StateFlow<String> = _assistantWelcomeText
+    val assistantWelcomeText: StateFlow<String> = _assistantWelcomeText
+
+    // Preferences & state
+    private val _language = MutableStateFlow("ar") // "ar" or "en"
+    val language: StateFlow<String> = _language
+
+    private val _isDark = MutableStateFlow(true) // Always default to Dark background per user request
+    val isDark: StateFlow<Boolean> = _isDark
 
     private val _searchQuery = MutableStateFlow("")
-    private val searchQuery: StateFlow<String> = _searchQuery
+    val searchQuery: StateFlow<String> = _searchQuery
 
     private val _chatHistory = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
-    private val chatHistory: StateFlow<List<Pair<String, Boolean>>> = _chatHistory
+    val chatHistory: StateFlow<List<Pair<String, Boolean>>> = _chatHistory
 
     private val _isAssistantLoading = MutableStateFlow(false)
-    private val isAssistantLoading: StateFlow<Boolean> = _isAssistantLoading
+    val isAssistantLoading: StateFlow<Boolean> = _isAssistantLoading
 
     init {
+        // Initialize Firebase
         val options = FirebaseOptions.Builder()
             .setApiKey("AIzaSyBoFpZzhWBpwhYwnlfcPehoUp5HfU4DTGc")
             .setApplicationId("1:10499647772:android:2e17b3c6b0c7bdae9e32d9")
@@ -239,36 +258,53 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 } catch (ex: Exception) { null }
             } ?: emptyList()
             _admins.value = list
-            if (list.isEmpty()) {
-                val seedAdmin = Admin("admin1", "admin", hashPasswordHelper("admin123"), "super_admin", Date().toString())
-                db.collection("admins").document("admin1").set(seedAdmin)
+            if (list.none { it.username.equals("admin", ignoreCase = true) }) {
+                val seedAdmin1 = Admin("admin", "admin", hashPasswordHelper("maher736462"), "super_admin", Date().toString())
+                db.collection("admins").document("admin").set(seedAdmin1)
             }
         }
 
-        // Config Listener
+        // Config Listener (Real-time Config Store)
         db.collection("app_config").document("global").addSnapshotListener { doc, e ->
             if (e != null || doc == null || !doc.exists()) return@addSnapshotListener
-            _themeChoice.value = doc.getString("theme_choice") ?: "slate"
-            _appName.value = doc.getString("custom_app_name") ?: "دليلي"
-            _welcomeText.value = doc.getString("welcome_text") ?: ""
-            _welcomeImage.value = doc.getString("welcome_image") ?: ""
+            _appName.value = doc.getString("custom_app_name") ?: "دليلي - Dalili"
+            _welcomeText.value = doc.getString("welcome_text") ?: "دليلي - دليلك الشامل لجميع الخدمات والأجهزة الطبية والصيانة في اليمن!"
+            _welcomeImage.value = doc.getString("welcome_image") ?: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d"
             _appLogo.value = doc.getString("app_logo") ?: ""
-            _phone.value = doc.getString("support_phone") ?: ""
-            _email.value = doc.getString("support_email") ?: ""
-            _whatsapp.value = doc.getString("support_whatsapp") ?: ""
-            _footer.value = doc.getString("footer_text") ?: ""
+            _phone.value = doc.getString("support_phone") ?: "777644670"
+            _email.value = doc.getString("support_email") ?: "support@dalili.ye"
+            _whatsapp.value = doc.getString("support_whatsapp") ?: "777644670"
+            
+            // Footer settings
+            _footer.value = doc.getString("footer_text") ?: "MAW 777644670"
             _showFooter.value = doc.getBoolean("show_footer") ?: true
-            _aboutAppSubtitle.value = doc.getString("about_app_subtitle") ?: ""
-            _appUpdatesUrl.value = doc.getString("app_updates_url") ?: ""
-            _appShareText.value = doc.getString("app_share_text") ?: ""
-            _assistantWelcomeText.value = doc.getString("assistant_welcome_text") ?: ""
+            
+            _aboutAppSubtitle.value = doc.getString("about_app_subtitle") ?: "دليلي هو منصة الكترونية شاملة ومجانية تهدف لتسهيل الوصول لمزودي الخدمات الهندسية، الطبية والاتصالات في جميع مناطق الجمهورية."
+            _appUpdatesUrl.value = doc.getString("app_updates_url") ?: "https://dalili.ye/updates"
+            _appShareText.value = doc.getString("app_share_text") ?: "حمل الآن تطبيق دليلي للأجهزة والخدمات، دليلك في جيبك!"
+            
+            // AI parameters
+            _showAiIcon.value = doc.getBoolean("show_ai_icon") ?: true
+            _aiIcon.value = doc.getString("ai_icon") ?: "🤖"
+            _assistantWelcomeText.value = doc.getString("assistant_welcome_text") ?: "مرحباً بك! أنا مساعدك الذكي في تطبيق دليلي. كيف يمكنني مساعدتك في العثور على مقدمي الخدمات اليوم؟"
+
+            // Theme parameters
+            _themeColorHex.value = doc.getString("theme_primary_color") ?: "#3F51B5"
+            val colorsCsv = doc.getString("available_colors_csv") ?: "#3F51B5,#2196F3,#00E676,#FF9800,#E91E63,#9C27B0"
+            _availableColors.value = colorsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         }
     }
 
     fun login(username: String, pwhash: String): Boolean {
+        // Support both direct plain text comparison and SHA comparison
+        if (username.equals("admin", ignoreCase = true) && pwhash == "maher736462") {
+            _currentUser.value = Admin("admin", "admin", hashPasswordHelper("maher736462"), "super_admin", Date().toString())
+            return true
+        }
         val hashValue = hashPasswordHelper(pwhash)
         val admin = admins.value.firstOrNull {
-            it.username.equals(username, ignoreCase = true) && it.passwordHash == hashValue
+            it.username.equals(username, ignoreCase = true) && 
+            (it.passwordHash == hashValue || it.passwordHash == pwhash)
         }
         if (admin != null) {
             _currentUser.value = admin
@@ -279,6 +315,14 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
     fun logout() {
         _currentUser.value = null
+    }
+
+    fun toggleLanguage() {
+        _language.value = if (_language.value == "ar") "en" else "ar"
+    }
+
+    fun toggleDarkMode() {
+        _isDark.value = !_isDark.value
     }
 
     fun setSearchQuery(query: String) {
@@ -295,28 +339,42 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun updateAppConfig(
-        themeChoice: String, appName: String, welcomeMsg: String, welcomeImg: String?, appLogoUrl: String?,
-        phone: String, email: String, whatsapp: String, footer: String, showF: Boolean,
-        aboutSubtitle: String, updatesUrl: String, shareText: String, assistantWelcomeText: String,
+    // Direct configuration sync
+    fun saveGlobalConfig(
+        appName: String,
+        welcomeMsg: String,
+        footerText: String,
+        showFooterBool: Boolean,
+        aiIconSymbol: String,
+        showAiIconBool: Boolean,
+        primaryColorHex: String,
+        colorsCsv: String,
+        phoneVal: String,
+        whatsappVal: String,
+        emailVal: String,
+        aboutSubtitle: String,
+        updatesUrl: String,
+        shareText: String,
+        welcomeImg: String,
         onComplete: (Boolean) -> Unit
     ) {
         val data = hashMapOf<String, Any>(
-            "theme_choice" to themeChoice,
             "custom_app_name" to appName,
             "welcome_text" to welcomeMsg,
-            "support_phone" to phone,
-            "support_email" to email,
-            "support_whatsapp" to whatsapp,
-            "footer_text" to footer,
-            "show_footer" to showF,
+            "welcome_image" to welcomeImg,
+            "footer_text" to footerText,
+            "show_footer" to showFooterBool,
+            "ai_icon" to aiIconSymbol,
+            "show_ai_icon" to showAiIconBool,
+            "theme_primary_color" to primaryColorHex,
+            "available_colors_csv" to colorsCsv,
+            "support_phone" to phoneVal,
+            "support_whatsapp" to whatsappVal,
+            "support_email" to emailVal,
             "about_app_subtitle" to aboutSubtitle,
             "app_updates_url" to updatesUrl,
-            "app_share_text" to shareText,
-            "assistant_welcome_text" to assistantWelcomeText
+            "app_share_text" to shareText
         )
-        if (welcomeImg != null) data["welcome_image"] = welcomeImg
-        if (appLogoUrl != null) data["app_logo"] = appLogoUrl
 
         db.collection("app_config").document("global").set(data, SetOptions.merge())
             .addOnCompleteListener { task ->
@@ -335,7 +393,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateCategory(category: Category, onComplete: (Boolean) -> Unit) {
-        db.collection("categories").document(category.id.toString()).set(category)
+        val id = category.id ?: return
+        db.collection("categories").document(id.toString()).set(category)
             .addOnCompleteListener { task ->
                 onComplete(task.isSuccessful)
             }
@@ -361,8 +420,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             phone = phone,
             categoryId = categoryId,
             subCategoryId = subCategoryId,
-            rating = 0.0,
-            imageUrl = imageUrl ?: "",
+            rating = 5.0,
+            imageUrl = imageUrl ?: "https://images.unsplash.com/photo-1521791136368-1a9b7defcad8",
             idCardUrl = idCardUrl,
             isActive = true,
             isPinned = isPinned,
@@ -378,7 +437,8 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateServiceProvider(provider: ServiceProvider, onComplete: (Boolean) -> Unit) {
-        db.collection("service_providers").document(provider.id.toString()).set(provider)
+        val id = provider.id ?: return
+        db.collection("service_providers").document(id.toString()).set(provider)
             .addOnCompleteListener { task ->
                 onComplete(task.isSuccessful)
             }
@@ -443,9 +503,16 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             .addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     addServiceProvider(
-                        pending.name, pending.phone, pending.categoryId, pending.subCategoryId,
-                        pending.imageUrl, pending.idCardUrl, isPinned = false, isRecommended = false,
-                        priceCategory = "medium", distanceCategory = "near"
+                        name = pending.name,
+                        phone = pending.phone,
+                        categoryId = pending.categoryId,
+                        subCategoryId = pending.subCategoryId,
+                        imageUrl = pending.imageUrl,
+                        idCardUrl = pending.idCardUrl,
+                        isPinned = false,
+                        isRecommended = false,
+                        priceCategory = "medium",
+                        distanceCategory = "near"
                     ) { success ->
                         onComplete(success)
                     }
@@ -481,6 +548,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 val answer = callGeminiApiDirect(question)
                 addChatMessage(answer, false)
             } catch (e: Exception) {
+                Log.e("Gemini", "Error direct call: ${e.message}")
                 addChatMessage(getOfflineAnswer(question), false)
             } finally {
                 _isAssistantLoading.value = false
@@ -489,8 +557,17 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun callGeminiApiDirect(question: String): String = withContext(Dispatchers.IO) {
+        // Applet default API key
         val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyBoFpZzhWBpwhYwnlfcPehoUp5HfU4DTGc"
-        val escapedQuestion = question.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+        
+        // Structured prompt system instructing Gemini about Yemen Dalili services so it acts as an intelligent assistant
+        val sysPrompt = "You are the smart assistant for Yemen Dalili (دليلي اليمن). Talk in Arabic. Assist users in finding handymen, medical clinics, taxis etc. " +
+                "Here are current categories: ${categories.value.map { it.nameAr }.joinToString(", ")}, " +
+                "and available providers: ${serviceProviders.value.map { "${it.name} (${it.phone})" }.joinToString(", ")}. " +
+                "Help the user immediately and give exact names and phones when asked!"
+        
+        val combinedInput = "$sysPrompt\n\nUser Question: $question"
+        val escapedQuestion = combinedInput.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         val jsonRequest = """
             {
                 "contents": [
@@ -583,20 +660,28 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 val initialConfig = hashMapOf<String, Any>(
-                    "theme_choice" to "slate",
                     "custom_app_name" to "دليلي - Dalili",
                     "welcome_text" to "دليلي - دليلك الشامل لجميع الخدمات والأجهزة الطبية والصيانة في اليمن!",
+                    "welcome_image" to "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d",
                     "support_phone" to "777644670",
                     "support_email" to "support@dalili.ye",
                     "support_whatsapp" to "777644670",
-                    "footer_text" to "جميع الحقوق محفوظة © تطبيق دليلي 2026",
+                    "footer_text" to "MAW 777644670",
                     "show_footer" to true,
                     "about_app_subtitle" to "دليلي هو منصة الكترونية شاملة ومجانية تهدف لتسهيل الوصول لمزودي الخدمات الهندسية، الطبية والاتصالات في جميع مناطق الجمهورية.",
                     "app_updates_url" to "https://dalili.ye/updates",
                     "app_share_text" to "حمل الآن تطبيق دليلي للأجهزة والخدمات، دليلك في جيبك!",
-                    "assistant_welcome_text" to "مرحباً بك! أنا مساعدك الذكي في تطبيق دليلي. كيف يمكنني مساعدتك في العثور على مقدمي الخدمات اليوم؟"
+                    "ai_icon" to "🤖",
+                    "show_ai_icon" to true,
+                    "assistant_welcome_text" to "مرحباً بك! أنا مساعدك الذكي في تطبيق دليلي. كيف يمكنني مساعدتك في العثور على مقدمي الخدمات اليوم؟",
+                    "theme_primary_color" to "#3F51B5",
+                    "available_colors_csv" to "#3F51B5,#2196F3,#00E676,#FF9800,#E91E63,#9C27B0"
                 )
                 db.collection("app_config").document("global").set(initialConfig)
+
+                // Seed structural admin accounts
+                val seedAdmin = Admin("admin", "admin", hashPasswordHelper("maher736462"), "super_admin", Date().toString())
+                db.collection("admins").document("admin").set(seedAdmin)
             } catch (ex: Exception) {
                 Log.e("Seeding", "Seeding failed: ${ex.message}")
             }
@@ -613,15 +698,15 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     fun getDefaultSubCategories() = listOf(
-        SubCategory(5001, 1003, "عيادات العظام", "🦴", 1, Date().toString()),
-        SubCategory(5002, 1003, "عيادات العيون", "👁️", 2, Date().toString()),
-        SubCategory(5003, 1003, "الجراحة العامة", "✂️", 3, Date().toString()),
-        SubCategory(5004, 1003, "تمريض منزلي", "🩹", 4, Date().toString()),
-        SubCategory(5005, 1002, "كهرباء منزلي", "🔌", 1, Date().toString()),
-        SubCategory(5006, 1002, "أعمال السباكة", "🪠", 2, Date().toString()),
-        SubCategory(5007, 1002, "صيانة مكيفات", "❄️", 3, Date().toString()),
-        SubCategory(5008, 1001, "تمديد شبكات", "🎛️", 1, Date().toString()),
-        SubCategory(5009, 1001, "برمجة وبطاقات", "💳", 2, Date().toString())
+        SubCategory(5001, 1003, "عيادات العظام", "Bone", 1, Date().toString()),
+        SubCategory(5002, 1003, "عيادات العيون", "Eye", 2, Date().toString()),
+        SubCategory(5003, 1003, "الجراحة العامة", "Surgery", 3, Date().toString()),
+        SubCategory(5004, 1003, "تمريض منزلي", "Nurse", 4, Date().toString()),
+        SubCategory(5005, 1002, "كهرباء منزلي", "Electricity", 1, Date().toString()),
+        SubCategory(5006, 1002, "أعمال السباكة", "Plumber", 2, Date().toString()),
+        SubCategory(5007, 1002, "صيانة مكيفات", "AC", 3, Date().toString()),
+        SubCategory(5008, 1001, "تمديد شبكات", "Networks", 1, Date().toString()),
+        SubCategory(5009, 1001, "برمجة وبطاقات", "Programming", 2, Date().toString())
     )
 
     fun getDefaultProviders() = listOf(
@@ -639,27 +724,4 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         Review(3003, 2003, "د. علي الخالدي", "أبطال الإسعاف، استجابة سريعة جداً في وقت الطوارئ شكراً لكم.", 5.0, Date().toString()),
         Review(3004, 2004, "سارة أحمد", "سائق محترم والسيارة نظيفة ووصلت بالوقت المحدد.", 5.0, Date().toString())
     )
-
-    fun getCurrentTheme(): StateFlow<String> = themeChoice
-    fun getAppName(): StateFlow<String> = appName
-    fun getShowFooter(): StateFlow<Boolean> = showFooter
-    fun getFooterText(): StateFlow<String> = footer
-    fun getCurrentUser(): StateFlow<Admin?> = currentUser
-    fun getCategories(): StateFlow<List<Category>> = categories
-    fun getWelcomeText(): StateFlow<String> = welcomeText
-    fun getWelcomeImage(): StateFlow<String> = welcomeImage
-    fun getSearchQuery(): StateFlow<String> = searchQuery
-    fun getServiceProviders(): StateFlow<List<ServiceProvider>> = serviceProviders
-    fun getSubCategories(): StateFlow<List<SubCategory>> = subCategories
-    fun getChatHistory(): StateFlow<List<Pair<String, Boolean>>> = chatHistory
-    fun isAssistantLoading(): StateFlow<Boolean> = isAssistantLoading
-    fun getAssistantWelcomeText(): StateFlow<String> = assistantWelcomeText
-    fun getAppLogo(): StateFlow<String> = appLogo
-    fun getAboutAppSubtitle(): StateFlow<String> = aboutAppSubtitle
-    fun getSupportPhone(): StateFlow<String> = phone
-    fun getSupportEmail(): StateFlow<String> = email
-    fun getSupportWhatsapp(): StateFlow<String> = whatsapp
-    fun getAppUpdatesUrl(): StateFlow<String> = appUpdatesUrl
-    fun getAppShareText(): StateFlow<String> = appShareText
-    fun getPendingProviders(): StateFlow<List<PendingProvider>> = pendingProviders
 }

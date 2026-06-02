@@ -1,7 +1,0 @@
-package coil.compose.base;
-
-/* loaded from: /tmp/dex/classes2.dex */
-public final class R {
-    private R() {
-    }
-}

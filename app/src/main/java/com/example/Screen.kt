@@ -13,4 +13,7 @@ sealed class Screen {
     object AdminDashboard : Screen() {
         val INSTANCE: Screen = this
     }
+    object ProviderRegister : Screen() {
+        val INSTANCE: Screen = this
+    }
 }
