@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.yemende"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.yemende"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
         versionName = "1.0"
 
@@ -65,22 +65,19 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
 
-    // Jetpack Compose
-    val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
-    implementation(composeBom)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // Jetpack Compose (Explicit Versions)
+    implementation("androidx.compose.ui:ui:1.6.2")
+    implementation("androidx.compose.ui:ui-graphics:1.6.2")
+    implementation("androidx.compose.ui:ui-tooling-preview:1.6.2")
+    implementation("androidx.compose.material3:material3:1.2.1")
 
     // Navigation and Serialization
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
-    // Firebase (manual API initialization is used in VM)
-    implementation(platform("com.google.firebase:firebase-bom:32.7.2"))
-    implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.firebase:firebase-storage-ktx")
-    implementation("com.google.firebase:firebase-auth-ktx")
+    // Firebase (Explicit Versions)
+    implementation("com.google.firebase:firebase-firestore-ktx:24.10.2")
+    implementation("com.google.firebase:firebase-storage-ktx:20.3.0")
+    implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
 
     // Coil for image loading
     implementation("io.coil-kt:coil-compose:2.6.0")
