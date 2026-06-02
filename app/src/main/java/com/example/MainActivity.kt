@@ -41,7 +41,6 @@ import coil.compose.AsyncImage
 import com.example.data.*
 import com.example.ui.DaliliViewModel
 import com.example.ui.theme.MyApplicationTheme
-import com.yipiao.YpSystem // Just in case system interactions are used
 import java.util.Date
 
 class MainActivity : ComponentActivity() {
@@ -79,8 +78,8 @@ fun CustomTextField(
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(text = label, color = Color.White.copy(alpha = 0.9f)) },
-        placeholder = { Text(text = placeholder, color = Color.White.copy(alpha = 0.6f)) },
+        label = { Text(text = label, color = Color.White) },
+        placeholder = { Text(text = placeholder, color = Color.White.copy(alpha = 0.8f)) },
         textStyle = TextStyle(
             color = Color.White,
             fontWeight = FontWeight.Bold,
@@ -98,8 +97,12 @@ fun CustomTextField(
             focusedContainerColor = Color(0xFF1E1E1E), // Solid dark surface for clear contrast
             unfocusedContainerColor = Color(0xFF262626),
             focusedBorderColor = Color.White,
-            unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
-            cursorColor = Color.White
+            unfocusedBorderColor = Color.White.copy(alpha = 0.7f),
+            cursorColor = Color.White,
+            focusedLabelColor = Color.White,
+            unfocusedLabelColor = Color.White,
+            focusedPlaceholderColor = Color.White.copy(alpha = 0.8f),
+            unfocusedPlaceholderColor = Color.White.copy(alpha = 0.6f)
         ),
         shape = RoundedCornerShape(12.dp)
     )
@@ -289,7 +292,7 @@ fun HomeScreen(viewModel: DaliliViewModel, onCategoryClick: (Category) -> Unit) 
                     .padding(bottom = 16.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
-                Box(modifier = Modifier.height(180.getDpOrPx())) {
+                Box(modifier = Modifier.height(180.dp)) {
                     if (welcomeImage.isNotEmpty()) {
                         AsyncImage(
                             model = welcomeImage,
