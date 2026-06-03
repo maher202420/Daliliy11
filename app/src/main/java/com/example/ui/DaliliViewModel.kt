@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,12 +10,42 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlin.math.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.Serializable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+@Serializable
+data class GlobalSyncData(
+    val settings: AppSettings = AppSettings(),
+    val categories: List<Category> = emptyList(),
+    val subcategories: List<Subcategory> = emptyList(),
+    val providers: List<Provider> = emptyList(),
+    val reviews: List<Review> = emptyList(),
+    val loyaltyPointsLog: List<LoyaltyPoints> = emptyList(),
+    val chatRooms: List<ChatRoom> = emptyList(),
+    val currentRoomMessages: List<ChatMessage> = emptyList(),
+    val invoices: List<Invoice> = emptyList(),
+    val banners: List<PromotionBanner> = emptyList(),
+    val verifications: List<VerificationDocument> = emptyList(),
+    val appointments: List<Appointment> = emptyList(),
+    val moderators: List<Moderator> = emptyList(),
+    val activityLogs: List<AdminActivityLog> = emptyList(),
+    val faqs: List<FaqItem> = emptyList(),
+    val userPoints: Int = 120
+)
 
 class DaliliViewModel(application: Application) : AndroidViewModel(application) {
 
     private val localDb = LocalDatabase.getDatabase(application)
     private val categoryDao = localDb.categoryDao()
     private val providerDao = localDb.providerDao()
+    private val prefs = application.getSharedPreferences("dalili_prefs", Context.MODE_PRIVATE)
 
     // -------------------------------------------------------------
     // App State Properties (Reactive)
@@ -125,12 +156,21 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     // Initialization with Gorgeous Demo Data
     // -------------------------------------------------------------
     init {
+        val savedRole = prefs.getString("saved_role", "Guest") ?: "Guest"
+        val savedEmail = prefs.getString("saved_email", "user@example.com") ?: "user@example.com"
+        _currentUserRole.value = savedRole
+        _currentUserEmail.value = savedEmail
+
         loadDefaultDataset()
         observeRoomSync()
-        // Automatically simulate backgrounds logs syncing
+        // Automatically fetch updates from other devices/Firestore
         viewModelScope.launch {
+            // First time loading: try to fetch from shared server instantly!
+            delay(1000)
+            performSyncWithFirestore()
+            
             while (true) {
-                delay(30000) // check background sync state every 30s
+                delay(8000) // poll from shared bucket every 8s for real-time live synchronization!
                 if (_isOnline.value && !_isDataSavingMode.value) {
                     performSyncWithFirestore()
                 }
@@ -485,36 +525,124 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // -------------------------------------------------------------
-    // Sync to Room Database (Offline Mirroring)
+    // Sync to Room Database (Offline Mirroring) and Cloud Shared Bucket
     // -------------------------------------------------------------
+    private val client = OkHttpClient()
+    private val jsonConfig = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
+    private val syncUrl = "https://kvdb.io/f7adf25a-7fb9-484e-93e5-4e7c5a0b1f68/dalili_sync_v2"
+    private var isCurrentlySyncingNetwork = false
+
     fun performSyncWithFirestore() {
+        if (!_isOnline.value) return
+        if (isCurrentlySyncingNetwork) return
+        isCurrentlySyncingNetwork = true
         viewModelScope.launch {
             try {
-                // Mimic network fetch
-                delay(1000)
-
-                // Populate Room DB with current Live data to preserve offline consistency
-                categoryDao.clearAll()
-                categoryDao.insertCategories(_categories.value.map {
-                    CachedCategory(it.id, it.nameAr, it.nameEn, it.iconName, it.isPinned, it.order)
-                })
-
-                providerDao.clearAll()
-                providerDao.insertProviders(_providers.value.map {
-                    CachedProvider(
-                        it.id, it.name, it.phone, it.categoryId, it.subcategoryId,
-                        it.personalPhotoUrl, it.workspacePhotoUrl, it.city, it.neighborhood,
-                        it.latitude, it.longitude, it.isVerified, it.isPremium,
-                        it.rating, it.reviewCount, it.isPinned, it.viewsCount,
-                        it.responseTimeMs, it.pointsRedeemOption
-                    )
-                })
-
-                val timeLog = "Time: ${System.currentTimeMillis()} | مزامنة ناجحة لقاعدة البيانات مع Firestore"
-                _syncLogs.value = listOf(timeLog) + _syncLogs.value
+                val request = Request.Builder()
+                    .url(syncUrl)
+                    .get()
+                    .build()
+                
+                val response = withContext(Dispatchers.IO) {
+                    client.newCall(request).execute()
+                }
+                
+                if (response.isSuccessful) {
+                    val jsonStr = response.body?.string() ?: ""
+                    if (jsonStr.trim().isNotEmpty()) {
+                        val syncedData = jsonConfig.decodeFromString<GlobalSyncData>(jsonStr)
+                        
+                        _settings.value = syncedData.settings
+                        _categories.value = syncedData.categories
+                        _subcategories.value = syncedData.subcategories
+                        _providers.value = syncedData.providers
+                        _reviews.value = syncedData.reviews
+                        _loyaltyPointsLog.value = syncedData.loyaltyPointsLog
+                        _chatRooms.value = syncedData.chatRooms
+                        _currentRoomMessages.value = syncedData.currentRoomMessages
+                        _invoices.value = syncedData.invoices
+                        _banners.value = syncedData.banners
+                        _verifications.value = syncedData.verifications
+                        _appointments.value = syncedData.appointments
+                        _moderators.value = syncedData.moderators
+                        _activityLogs.value = syncedData.activityLogs
+                        _faqs.value = syncedData.faqs
+                        _userPoints.value = syncedData.userPoints
+                        
+                        try {
+                            categoryDao.clearAll()
+                            categoryDao.insertCategories(syncedData.categories.map {
+                                CachedCategory(it.id, it.nameAr, it.nameEn, it.iconName, it.isPinned, it.order)
+                            })
+                            providerDao.clearAll()
+                            providerDao.insertProviders(syncedData.providers.map {
+                                CachedProvider(
+                                    it.id, it.name, it.phone, it.categoryId, it.subcategoryId,
+                                    it.personalPhotoUrl, it.workspacePhotoUrl, it.city, it.neighborhood,
+                                    it.latitude, it.longitude, it.isVerified, it.isPremium,
+                                    it.rating, it.reviewCount, it.isPinned, it.viewsCount,
+                                    it.responseTimeMs, it.pointsRedeemOption
+                                )
+                            })
+                        } catch (e: Exception) {
+                            // Room error
+                        }
+                    }
+                    val timeLog = "Time: ${System.currentTimeMillis()} | مزامنة ناجحة لقاعدة البيانات مع Firestore"
+                    _syncLogs.value = listOf(timeLog) + _syncLogs.value
+                } else if (response.code == 404) {
+                    pushCurrentStateToFirestore()
+                } else {
+                    val errorLog = "Error: Mismatched connection code ${response.code}"
+                    _syncLogs.value = listOf(errorLog) + _syncLogs.value
+                }
             } catch (e: Exception) {
                 val errorLog = "Error: Mismatched SQLite: ${e.localizedMessage}"
                 _syncLogs.value = listOf(errorLog) + _syncLogs.value
+            } finally {
+                isCurrentlySyncingNetwork = false
+            }
+        }
+    }
+
+    fun pushCurrentStateToFirestore() {
+        if (!_isOnline.value) return
+        viewModelScope.launch {
+            try {
+                val syncObj = GlobalSyncData(
+                    settings = _settings.value,
+                    categories = _categories.value,
+                    subcategories = _subcategories.value,
+                    providers = _providers.value,
+                    reviews = _reviews.value,
+                    loyaltyPointsLog = _loyaltyPointsLog.value,
+                    chatRooms = _chatRooms.value,
+                    currentRoomMessages = _currentRoomMessages.value,
+                    invoices = _invoices.value,
+                    banners = _banners.value,
+                    verifications = _verifications.value,
+                    appointments = _appointments.value,
+                    moderators = _moderators.value,
+                    activityLogs = _activityLogs.value,
+                    faqs = _faqs.value,
+                    userPoints = _userPoints.value
+                )
+                val jsonStr = jsonConfig.encodeToString(syncObj)
+                val body = jsonStr.toRequestBody("application/json; charset=utf-8".toMediaType())
+                val request = Request.Builder()
+                    .url(syncUrl)
+                    .post(body)
+                    .build()
+                
+                withContext(Dispatchers.IO) {
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            // log error
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore gracefully
             }
         }
     }
@@ -611,6 +739,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             reasonEn = "Reviewed provider: $name"
         )
         _loyaltyPointsLog.value = listOf(pointsEvent) + _loyaltyPointsLog.value
+        pushCurrentStateToFirestore()
     }
 
     fun shareAppAction() {
@@ -624,6 +753,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             reasonEn = "Shared Dalili App application code"
         )
         _loyaltyPointsLog.value = listOf(pointsEvent) + _loyaltyPointsLog.value
+        pushCurrentStateToFirestore()
     }
 
     fun redeemGiftPoints(providerId: String) {
@@ -639,6 +769,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 reasonEn = "Redeemed 15% discount for provider: ${provider.name}"
             )
             _loyaltyPointsLog.value = listOf(pointsEvent) + _loyaltyPointsLog.value
+            pushCurrentStateToFirestore()
         }
     }
 
@@ -763,6 +894,34 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             status = "Pending"
         )
         _verifications.value = _verifications.value + requestDoc
+        pushCurrentStateToFirestore()
+    }
+
+    fun addNewApprovedProvider(name: String, phone: String, city: String, neigh: String, catId: String) {
+        val id = "prov_${System.currentTimeMillis()}"
+        val newRequest = Provider(
+            id = id,
+            name = name,
+            phone = phone,
+            categoryId = catId,
+            subcategoryId = "",
+            personalPhotoUrl = "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150",
+            workspacePhotoUrl = "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?w=300",
+            city = city,
+            neighborhood = neigh,
+            latitude = 31.95 + (Math.random() - 0.5) * 0.1,
+            longitude = 35.91 + (Math.random() - 0.5) * 0.1,
+            isVerified = true,
+            isPremium = false,
+            rating = 5.0f,
+            reviewCount = 0,
+            isPinned = false,
+            viewsCount = 1,
+            responseTimeMs = 200000L
+        )
+        _providers.value = _providers.value + newRequest
+        logAdminAction("إضافة مباشر لمزود خدمة معتمد وموثق: $name", "Added direct certified service provider to system: $name")
+        pushCurrentStateToFirestore()
     }
 
     fun optInSubscription() {
@@ -829,16 +988,26 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // Top Bar Customization Sync
-    fun updateTopBarOptions(showRf: Boolean, showLng: Boolean, showThm: Boolean, arTitle: String, enTitle: String) {
+    fun updateTopBarOptions(
+        showRf: Boolean, showLng: Boolean, showThm: Boolean, 
+        arTitle: String, enTitle: String,
+        lblRefAr: String, lblRefEn: String,
+        lblLangAr: String, lblLangEn: String
+    ) {
         val updated = _settings.value.copy(
             showRefreshIcon = showRf,
             showLanguageIcon = showLng,
             showThemeToggleIcon = showThm,
             topBarTitleAr = arTitle,
-            topBarTitleEn = enTitle
+            topBarTitleEn = enTitle,
+            refreshIconTitleAr = lblRefAr,
+            refreshIconTitleEn = lblRefEn,
+            languageIconTitleAr = lblLangAr,
+            languageIconTitleEn = lblLangEn
         )
         _settings.value = updated
-        logAdminAction("تعديل أزرار وأيقونات الشريط العلوي والمزامنة الفورية", "Modified Top-Bar icons settings and synchronized live")
+        logAdminAction("تعديل أزرار وأيقونات الشريط العلوي والمزامنة الفورية", "Modified Top-Bar icons settings and labels and synchronized live")
+        pushCurrentStateToFirestore()
     }
 
     // Color/Themes Control
@@ -849,6 +1018,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
         _settings.value = updated
         logAdminAction("تعديل سمة التطبيق الأساسية إلى $themeName", "Modified app system theme to $themeName")
+        pushCurrentStateToFirestore()
     }
 
     // Greeting Banner Customization
@@ -862,6 +1032,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
         _settings.value = updated
         logAdminAction("تعديل نص الترحيب في الصفحة الرئيسية", "Updated home welcome message configuration and background image")
+        pushCurrentStateToFirestore()
     }
 
     // Banner Advertisements Administration
@@ -877,11 +1048,13 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
         _banners.value = _banners.value + newBanner
         logAdminAction("إنشاء لافتة إعلانية جديدة للاستهداف بنطاق $seconds ثواني", "Created new advertising banner redirecting to $redirect for $seconds seconds")
+        pushCurrentStateToFirestore()
     }
 
     fun removePromotionBanner(id: String) {
         _banners.value = _banners.value.filter { it.id != id }
         logAdminAction("حذف لافتة إعلانية ممولة", "Deleted advertising banner $id")
+        pushCurrentStateToFirestore()
     }
 
     // Verified badge allocation (المستندات)
@@ -900,6 +1073,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
         val provName = _providers.value.find { it.id == providerId }?.name ?: providerId
         logAdminAction("اعتماد وتوثيق حالة مقدم الخدمة: $provName", "Approved and certified verification details for $provName")
+        pushCurrentStateToFirestore()
     }
 
     // Disable / Edit subscription parameters
@@ -912,6 +1086,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 it.copy(isPremium = nextState)
             } else it
         }
+        pushCurrentStateToFirestore()
     }
 
     // Pin provider/category in searches manually
@@ -924,6 +1099,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 it.copy(isPinned = nextPin)
             } else it
         }
+        pushCurrentStateToFirestore()
     }
 
     fun togglePinCategory(catId: String) {
@@ -935,6 +1111,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 it.copy(isPinned = nextPin)
             } else it
         }
+        pushCurrentStateToFirestore()
     }
 
     // Add Section Main Category / Subcategory
@@ -949,7 +1126,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
         _categories.value = _categories.value + newCat
         logAdminAction("إضافة قسم رئيسي جديد: $nameAr", "Added new main category index: $nameAr")
-        performSyncWithFirestore()
+        pushCurrentStateToFirestore()
     }
 
     fun addNewSubcategory(catId: String, nameAr: String, nameEn: String) {
@@ -973,6 +1150,7 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
         _moderators.value = _moderators.value + m
         logAdminAction("إضافة مشرف لوحة تحكم جديد: $email", "Registered new system moderator user: $email")
+        pushCurrentStateToFirestore()
     }
 
     fun changeModeratorPassword(email: String, newPass: String) {
@@ -982,6 +1160,59 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                 it.copy(passwordPlain = newPass)
             } else it
         }
+        pushCurrentStateToFirestore()
+    }
+
+    fun deleteModeratorUser(email: String) {
+        _moderators.value = _moderators.value.filter { !it.email.equals(email, ignoreCase = true) }
+        logAdminAction("حذف مشرف لوحة تحكم: $email", "Deleted system moderator user: $email")
+        pushCurrentStateToFirestore()
+    }
+
+    fun deleteProvider(id: String) {
+        val provName = _providers.value.find { it.id == id }?.name ?: id
+        _providers.value = _providers.value.filter { it.id != id }
+        logAdminAction("حذف مقدم الخدمة: $provName", "Deleted service provider: $provName")
+        pushCurrentStateToFirestore()
+    }
+
+    fun logout() {
+        _currentUserRole.value = "Guest"
+        _currentUserEmail.value = "user@example.com"
+        prefs.edit()
+            .putString("saved_role", "Guest")
+            .putString("saved_email", "user@example.com")
+            .apply()
+    }
+
+    fun attemptLogin(usernameInput: String, passwordInput: String, rememberMe: Boolean): Boolean {
+        val trimUser = usernameInput.trim()
+        val trimPass = passwordInput.trim()
+        
+        val role = when {
+            trimUser == "WAM2026" && trimPass == "maher736462" -> "Admin"
+            trimUser == "WAM2026" && trimPass == "maher--736462" -> "Owner"
+            trimUser == "Owner" && trimPass == "maher--736462" -> "Owner"
+            else -> {
+                val found = _moderators.value.find { it.email.equals(trimUser, ignoreCase = true) && it.passwordPlain == trimPass }
+                if (found != null && !found.isBlocked) "Supervisor" else null
+            }
+        }
+        
+        if (role != null) {
+            _currentUserRole.value = role
+            _currentUserEmail.value = trimUser
+            if (rememberMe) {
+                prefs.edit()
+                    .putString("saved_role", role)
+                    .putString("saved_email", trimUser)
+                    .apply()
+            } else {
+                prefs.edit().remove("saved_role").remove("saved_email").apply()
+            }
+            return true
+        }
+        return false
     }
 
     // FAQs administration (Firestore synchronized)
@@ -996,17 +1227,45 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         )
         _faqs.value = _faqs.value + item
         logAdminAction("إضافة دليل إجابة سؤال شائع بـ Firestore", "Created new Firestore sync FAQ schema")
+        pushCurrentStateToFirestore()
     }
 
     fun deleteFaqItem(id: String) {
         _faqs.value = _faqs.value.filter { it.id != id }
         logAdminAction("حذف سؤال معتمد بقاعدة البيانات", "Removed FAQ structure $id from Firestore")
+        pushCurrentStateToFirestore()
     }
 
     // Radius control settings
     fun updateMaxSearchRadius(maxLim: Double) {
         _settings.value = _settings.value.copy(maxSearchRadiusKm = maxLim)
         logAdminAction("تعديل الحد الأقصى الافتراضي لنطاق البحث إلى $maxLim كم", "Updated max permitted circle radius search limit to $maxLim KM")
+        pushCurrentStateToFirestore()
+    }
+
+    // Smart Assistant Configuration Controls
+    fun updateAssistantConfig(show: Boolean, iconName: String, position: String) {
+        val updated = _settings.value.copy(
+            showAssistant = show,
+            assistantIconName = iconName,
+            assistantPosition = position
+        )
+        _settings.value = updated
+        logAdminAction("تعديل إعدادات المساعد الذكي والموقع الفوري", "Modified smart assistant configuration to show=$show, icon=$iconName, pos=$position")
+        pushCurrentStateToFirestore()
+    }
+
+    // WAM777 Footer Configuration Controls
+    fun updateFooterConfig(show: Boolean, text: String, size: Float, position: String) {
+        val updated = _settings.value.copy(
+            showFooter = show,
+            footerText = text,
+            footerSize = size,
+            footerPosition = position
+        )
+        _settings.value = updated
+        logAdminAction("تعديل إعدادات التذييل الموجه WAM777", "Modified footer settings: show=$show, text=$text, sizing=$size")
+        pushCurrentStateToFirestore()
     }
 
     // -------------------------------------------------------------

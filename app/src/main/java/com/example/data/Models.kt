@@ -167,11 +167,26 @@ data class AppSettings(
     val showThemeToggleIcon: Boolean = true,
     val topBarTitleAr: String = "دليلي",
     val topBarTitleEn: String = "Dalili",
+    val refreshIconTitleAr: String = "تحديث",
+    val refreshIconTitleEn: String = "Sync",
+    val languageIconTitleAr: String = "لغة",
+    val languageIconTitleEn: String = "Lang",
     // Radius Search
     val maxSearchRadiusKm: Double = 50.0,
     val defaultSearchRadiusKm: Double = 10.0,
     // FAQ / Manual Search
-    val isFaqEnabled: Boolean = true
+    val isFaqEnabled: Boolean = true,
+    
+    // Smart Assistant floating button configuration
+    val showAssistant: Boolean = true,
+    val assistantIconName: String = "SupportAgent", // SupportAgent, Chat, Help, Support
+    val assistantPosition: String = "BottomRight", // BottomRight, BottomLeft, TopRight, TopLeft
+    
+    // WAM777 Footer configuration
+    val showFooter: Boolean = true,
+    val footerText: String = "WAM777",
+    val footerSize: Float = 14f, // sp
+    val footerPosition: String = "Bottom" // Bottom, Top
 )
 
 @Serializable
