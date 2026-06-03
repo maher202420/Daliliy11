@@ -1,6 +1,10 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -9,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -38,9 +42,7 @@ android {
     }
     buildFeatures {
         compose = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14" // aligned with Kotlin 1.9.24!
+        buildConfig = true
     }
     packaging {
         resources {
@@ -50,27 +52,41 @@ android {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    
-    // Direct Compose Coordinates
-    implementation("androidx.compose.ui:ui:1.6.8")
-    implementation("androidx.compose.ui:ui-graphics:1.6.8")
-    implementation("androidx.compose.ui:ui-tooling-preview:1.6.8")
-    implementation("androidx.compose.material3:material3:1.2.1")
-    implementation("androidx.compose.material:material-icons-extended:1.6.8")
-    
-    // Lifecycle
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.activity.compose)
 
-    // Coil & OkHttp
-    implementation("io.coil-kt:coil-compose:2.5.0")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    
-    // Direct Firebase Coordinates
-    implementation("com.google.firebase:firebase-firestore:24.10.1")
-    implementation("com.google.firebase:firebase-common:20.4.2")
-    implementation("com.google.firebase:firebase-common-ktx:20.4.2")
+    // Compose
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+
+    // Navigation
+    implementation(libs.androidx.navigation.compose)
+
+    // Room
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.messaging)
+
+    // Networking & Utilities
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.okhttp.logging)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.coil.compose)
+    implementation(libs.kotlinx.coroutines.android)
+
+    debugImplementation(libs.androidx.compose.ui.tooling)
 }
