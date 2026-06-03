@@ -10,8 +10,12 @@ import androidx.activity.viewModels
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.*
-import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,22 +26,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import androidx.compose.ui.draw.scale
 import com.example.data.*
 import com.example.ui.DaliliTheme
 import com.example.ui.DaliliViewModel
-import kotlinx.coroutines.delay
+import com.example.ui.parseColorSafe
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DaliliViewModel by viewModels()
@@ -45,9 +46,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val settings by viewModel.settings.collectAsState()
-            DaliliTheme(themeName = settings.appTheme, customPrimaryColorHex = settings.primaryColorHex) {
-                MainAppHost(viewModel)
+            val settings by viewModel.appSettings.collectAsState()
+            val currentScreen by viewModel.currentScreen.collectAsState()
+            
+            // RTL-aware Arabic language state
+            var isAr by remember { mutableStateOf(true) }
+
+            DaliliTheme(settings = settings) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    MainAppContent(
+                        viewModel = viewModel,
+                        settings = settings,
+                        currentScreen = currentScreen,
+                        isAr = isAr,
+                        onLanguageToggle = { isAr = !isAr }
+                    )
+                }
             }
         }
     }
@@ -55,2306 +72,2643 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainAppHost(viewModel: DaliliViewModel) {
-    val settings by viewModel.settings.collectAsState()
-    val isOnline by viewModel.isOnline.collectAsState()
-    val currentScreen by viewModel.currentScreen.collectAsState()
-    val currentRole by viewModel.currentUserRole.collectAsState()
-    val userEmail by viewModel.currentUserEmail.collectAsState()
-    val userPoints by viewModel.userPoints.collectAsState()
+fun MainAppContent(
+    viewModel: DaliliViewModel,
+    settings: AppSettings,
+    currentScreen: String,
+    isAr: Boolean,
+    onLanguageToggle: () -> Unit
+) {
+    val context = LocalContext.current
+    var backdoorTaps by remember { mutableStateOf(0) }
+    var showBackdoorDialog by remember { mutableStateOf(false) }
+    var backdoorPasswordInput by remember { mutableStateOf("") }
 
-    var activeLanguageAr by remember { mutableStateOf(true) }
+    // Helper translation map for visual fields
+    val t = remember(isAr) {
+        mapOf(
+            "home" to if (isAr) "الرئيسية" else "Home",
+            "login" to if (isAr) "تسجيل الدخول" else "Login",
+            "register" to if (isAr) "انضم إلينا" else "Join Us",
+            "search_placeholder" to if (isAr) "ابحث عن مزودي الخدمة أو الأقسام..." else "Search providers or categories...",
+            "categories" to if (isAr) "الأقسام والخدمات الرئيسية" else "Categories & Services",
+            "recommended" to if (isAr) "مقدمو خدمات موصى بهم ⭐" else "Recommended Providers ⭐",
+            "no_recommended" to if (isAr) "لا يوجد مقدمو خدمات تم رجميزهم للترقية حالياً." else "No featured providers currently.",
+            "pinned" to if (isAr) "مثبّت" else "Pinned",
+            "contact_support" to if (isAr) "تواصل مع الدعم الفني" else "Contact Support",
+            "admin_panel" to if (isAr) "لوحة الإدارة والمشرفين" else "Admin & Supervisors Panel",
+            "username" to if (isAr) "اسم المستخدم" else "Username",
+            "password" to if (isAr) "كلمة المرور" else "Password",
+            "login_btn" to if (isAr) "تسجيل دخول آمن" else "Secure Sign In",
+            "invalid_login" to if (isAr) "البيانات المدخلة خاطئة!" else "Invalid credentials!",
+            "triple_name" to if (isAr) "الاسم الثلاثي الكامل" else "Full Triple Name",
+            "phone" to if (isAr) "رقم الهاتف الفعال / واتساب" else "Phone / WhatsApp",
+            "select_cat" to if (isAr) "اختر القسم والخدمة الرئيسية" else "Select Category / Service",
+            "work_address" to if (isAr) "مكان وعنوان مكتب العمل الحالي" else "Current Work Office Address",
+            "district" to if (isAr) "منطقة الدائرة السكنية / المديرية" else "Residence District",
+            "gps" to if (isAr) "إحداثيات وموقع الخريطة GPS (اختياري)" else "GPS Coordinates (Optional)",
+            "personal_photo" to if (isAr) "رابط الصورة الشخصية (إجباري)" else "Personal Photo Link (Required)",
+            "id_card" to if (isAr) "رابط صورة بطاقة الهوية (اختياري)" else "ID Card Photo Link (Optional)",
+            "submit_req" to if (isAr) "تقديم طلب الانضمام للمراجعة الفورية" else "Submit Registration Request",
+            "use_demo_images" to if (isAr) "تعبئة صور تجريبية تلقائية" else "Use Standard Demo Images",
+            "req_success" to if (isAr) "تم تقديم طلبك بنجاح وسيتزامن فوراً مع لوحة المدير!" else "Your request has been submitted and is real-time synced!",
+            "fill_required" to if (isAr) "الرجاء تعبئة جميع الحقول الإجبارية!" else "Please fill all required fields!",
+            "admin_logged" to if (isAr) "مرحباً يا مدير!" else "Welcome Admin!",
+            "super_logged" to if (isAr) "مرحباً يا مشرف!" else "Welcome Supervisor!",
+            "logout" to if (isAr) "تسجيل الخروج" else "Logout",
+            "tabs_requests" to if (isAr) "طلبات التسجيل" else "Registration Requests",
+            "tabs_cats" to if (isAr) "إدارة الأقسام" else "Categories",
+            "tabs_direct_add" to if (isAr) "إضافة يدوي" else "Direct Add",
+            "tabs_manage_prov" to if (isAr) "إدارة مقدمي الخدمات" else "Manage Providers",
+            "tabs_sups" to if (isAr) "إدارة المشرفين" else "Supervisors",
+            "backdoor_dialog_title" to if (isAr) "بوابة المالك السرية" else "Owner Secret Gateway",
+            "backdoor_dialog_desc" to if (isAr) "الرجاء إدخال كلمة المرور الخلفية للوصول للإعدادات الفورية" else "Enter backdoor password to access settings instantly",
+            "backdoor_enter" to if (isAr) "دخول آمن" else "Authenticate",
+            "subcategories" to if (isAr) "الأقسام الفرعية" else "Subcategories",
+            "add_main_cat" to if (isAr) "إضافة قسم رئيسي" else "Add Main Category",
+            "add_sub_cat" to if (isAr) "إضافة قسم فرعي" else "Add Subcategory",
+            "ar_name" to if (isAr) "الاسم بالعربية" else "Arabic Name",
+            "en_name" to if (isAr) "الاسم بالإنجليزية" else "English Name",
+            "img_url" to if (isAr) "رابط الصورة" else "Image URL",
+            "sort_order" to if (isAr) "الترتيب" else "Sort Order",
+            "add_btn" to if (isAr) "إضافة" else "Add",
+            "direct_desc" to if (isAr) "إضافة مقدم خدمة إلى الدليل مباشرة بدون مراجعة" else "Add provider directory-wide instantly without check",
+            "pin_recom_desc" to if (isAr) "تثبيت وترشيح وتوصية مزودي الخدمات في الدليل" else "Pin & Recommend Directory Providers",
+            "pin_header" to if (isAr) "تثبيت بالقسم" else "Pin In Category",
+            "recom_header" to if (isAr) "توصية رئيسية" else "Recommend",
+            "delete" to if (isAr) "حذف" else "Delete",
+            "pending_details" to if (isAr) "تفاصيل طلب التسجيل" else "Registration Details",
+            "accept" to if (isAr) "قبول واعتماد" else "Accept Provider",
+            "reject" to if (isAr) "رفض واستبعاد" else "Reject Request",
+            "reviews_title" to if (isAr) "التقييمات وآراء العملاء" else "Customer Reviews & Ratings",
+            "add_review" to if (isAr) "كتابة تقييم جديد" else "Write a Review",
+            "review_user" to if (isAr) "اسمك الكامل" else "Your Full Name",
+            "review_comment" to if (isAr) "اكتب تجربتك هنا..." else "Describe your experience here...",
+            "review_submit" to if (isAr) "إرسال التقييم فوراً" else "Submit Review",
+            "secret_settings_title" to if (isAr) "لوحة التحكم السرية للمالك" else "Owner Secret Settings",
+            "app_name_setting" to if (isAr) "اسم التطبيق الرئيسي" else "Main App Name",
+            "primary_color" to if (isAr) "اللون الأساسي (Hex)" else "Primary Color (Hex)",
+            "secondary_color" to if (isAr) "اللون الثنائي / الفرعي (Hex)" else "Secondary Color (Hex)",
+            "welcome_message" to if (isAr) "رسالة ترحيب الشاشة الرئيسية" else "Home Screen Welcome Text",
+            "footer_setting" to if (isAr) "نص التذييل الدعائي" else "Sponsor Footer Text",
+            "sup_phone" to if (isAr) "رقم دعم العملاء" else "Support Phone",
+            "sup_email" to if (isAr) "بريد الدعم الفني" else "Support Email",
+            "admin_pwd" to if (isAr) "كلمة مرور المدير الجديدة" else "New Admin Password",
+            "save_all" to if (isAr) "حفظ التغييرات وتعميمها" else "Persist & Propagate Settings",
+            "no_results" to if (isAr) "لا توجد نتائج مطابقة لبحثك!" else "No matching results found!"
+        )
+    }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
+    Scaffold(
+        topBar = {
+            // Replaced custom real-time adaptive Top App Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .statusBarsPadding()
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                // Determine layout direction dynamically for icons
+                val contentModifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = contentModifier,
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Logo and Title (Acts as Backdoor Trigger when clicked 5 times)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable {
+                                backdoorTaps++
+                                if (backdoorTaps >= 5) {
+                                    backdoorTaps = 0
+                                    showBackdoorDialog = true
+                                }
+                            }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Face,
+                                contentDescription = "Logo",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = if (activeLanguageAr) settings.topBarTitleAr else settings.topBarTitleEn,
+                                text = settings.appName,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (activeLanguageAr) "دليل الموثوقين الموحد" else "Unified Services Almanac",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
+                                text = if (isAr) "دليل الخدمات الفوري" else "Live Almanac",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
-                    },
-                    actions = {
-                        if (settings.showRefreshIcon) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .clickable { viewModel.performSyncWithFirestore() }
-                                    .padding(horizontal = 6.dp)
-                            ) {
-                                Icon(Icons.Default.Refresh, "Refresh database", modifier = Modifier.size(20.dp))
-                                Text(
-                                    text = if (activeLanguageAr) settings.refreshIconTitleAr else settings.refreshIconTitleEn,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        if (settings.showLanguageIcon) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .clickable { activeLanguageAr = !activeLanguageAr }
-                                    .padding(horizontal = 6.dp)
-                            ) {
-                                Icon(Icons.Default.Translate, "Switch language", modifier = Modifier.size(20.dp))
-                                Text(
-                                    text = if (activeLanguageAr) settings.languageIconTitleAr else settings.languageIconTitleEn,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        if (settings.showThemeToggleIcon) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .clickable {
-                                        val nextTheme = when (settings.appTheme) {
-                                            "Cosmic Slate" -> "Charcoal Gold"
-                                            "Charcoal Gold" -> "Royal Emerald"
-                                            else -> "Cosmic Slate"
-                                        }
-                                        viewModel.changeThemePreference(nextTheme, settings.primaryColorHex)
-                                    }
-                                    .padding(horizontal = 6.dp)
-                            ) {
-                                Icon(Icons.Default.Palette, "Toggle Theme", modifier = Modifier.size(20.dp))
-                                Text(
-                                    text = if (activeLanguageAr) "السمة" else "Theme",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
-                )
-            },
-            bottomBar = {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    val items = listOf(
-                        Triple("home", Icons.Default.Home, if (activeLanguageAr) "الرئيسية" else "Home"),
-                        Triple("providers_list", Icons.Default.Search, if (activeLanguageAr) "الخدمات" else "Providers"),
-                        Triple("smart_bot", Icons.Default.SupportAgent, if (activeLanguageAr) "المساعد" else "Bot"),
-                        Triple("invoices", Icons.Default.ReceiptLong, if (activeLanguageAr) "الفواتير" else "Invoices"),
-                        Triple("admin_panel", Icons.Default.AdminPanelSettings, if (activeLanguageAr) "الإدارة" else "Admin")
-                    )
-                    items.forEach { (route, icon, label) ->
-                        // Hide favorites from bottom list as it has been omitted as per specs: "واخفاء ايقونه المفضله من الشريط السفلي"
-                        NavigationBarItem(
-                            selected = currentScreen == route,
-                            onClick = { viewModel.navigateTo(route) },
-                            icon = { Icon(icon, contentDescription = label) },
-                            label = { Text(label, fontSize = 11.sp, maxLines = 1) }
-                        )
                     }
-                }
-            },
-            content = { innerPadding ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .background(MaterialTheme.colorScheme.background)
-                ) {
-                    // Connection State Indicator
-                    SyncStateHeader(isOnline = isOnline, isAr = activeLanguageAr, viewModel = viewModel)
 
-                    // Navigation Routing switch
-                    Box(modifier = Modifier.weight(1f)) {
-                        when (currentScreen) {
-                            "home" -> HomeScreen(viewModel, activeLanguageAr)
-                            "providers_list" -> ProvidersListScreen(viewModel, activeLanguageAr)
-                            "provider_detail" -> ProviderDetailScreen(viewModel, activeLanguageAr)
-                            "chat_screen" -> ChatScreen(viewModel, activeLanguageAr)
-                            "invoices" -> InvoicesScreen(viewModel, activeLanguageAr)
-                            "admin_panel" -> AdminPanelScreen(viewModel, activeLanguageAr)
-                            "smart_bot" -> SmartBotScreen(viewModel, activeLanguageAr)
-                            else -> HomeScreen(viewModel, activeLanguageAr)
+                    // Top Bar Navigational Icons Row (1. Home 2. Lock 3. UserReg 4. Globe 5. Refresh)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Icon 1: HOME (🏠)
+                        IconButton(
+                            onClick = {
+                                viewModel.navigateTo("home")
+                                backdoorTaps++
+                                if (backdoorTaps >= 5) {
+                                    backdoorTaps = 0
+                                    showBackdoorDialog = true
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Home,
+                                contentDescription = "Home",
+                                tint = if (currentScreen == "home") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.size(26.dp)
+                            )
                         }
-                    }
-                }
-            }
-        )
 
-        // Custom Smart AI Floating Assistant overlay
-        if (settings.showAssistant) {
-            val assistantIcon = when (settings.assistantIconName) {
-                "Chat" -> Icons.Default.Chat
-                "Help" -> Icons.Default.Help
-                "Support" -> Icons.Default.Support
-                else -> Icons.Default.SupportAgent
-            }
-            
-            val alignment = when (settings.assistantPosition) {
-                "BottomLeft" -> Alignment.BottomStart
-                "TopRight" -> Alignment.TopEnd
-                "TopLeft" -> Alignment.TopStart
-                else -> Alignment.BottomEnd // BottomRight
-            }
-            
-            // Padding with logical layout clearances
-            val offsetModifier = when (settings.assistantPosition) {
-                "BottomLeft" -> Modifier.align(alignment).padding(start = 20.dp, bottom = 100.dp)
-                "TopRight" -> Modifier.align(alignment).padding(end = 20.dp, top = 90.dp)
-                "TopLeft" -> Modifier.align(alignment).padding(start = 20.dp, top = 90.dp)
-                else -> Modifier.align(alignment).padding(end = 20.dp, bottom = 100.dp)
-            }
-            
-            Box(
-                modifier = offsetModifier
-                    .size(56.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable { viewModel.navigateTo("smart_bot") },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    assistantIcon,
-                    contentDescription = "AI Floating Assistant",
-                    tint = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-        }
-
-        // Customizable WAM777 Backdoor Gateway Control Footer
-        if (settings.showFooter) {
-            val footerAlign = if (settings.footerPosition == "Top") Alignment.TopCenter else Alignment.BottomCenter
-            val footerPadding = if (settings.footerPosition == "Top") PaddingValues(top = 80.dp) else PaddingValues(bottom = 85.dp)
-            
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(footerPadding)
-                    .align(footerAlign),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = settings.footerText,
-                    fontSize = settings.footerSize.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.85f), shape = RoundedCornerShape(12.dp))
-                        .clickable { viewModel.navigateTo("admin_panel") } // Direct Backdoor interface action shortcut
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
-                )
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// Shared Layout Headers & Widgets
-// -------------------------------------------------------------
-@Composable
-fun SyncStateHeader(isOnline: Boolean, isAr: Boolean, viewModel: DaliliViewModel) {
-    val isSaving by viewModel.isDataSavingMode.collectAsState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(if (isOnline) Color(0xFF16A34A) else Color(0xFFDC2626))
-            .padding(vertical = 4.dp, horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(Color.White)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = if (isOnline) {
-                    if (isAr) "متصل ومزامن بالكامل مع Firestore" else "Online & completely synced with Firestore"
-                } else {
-                    if (isAr) "وضع الأوفلاين - القراءة من كاش الهاتف" else "Offline - Reading from local Room Cache"
-                },
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = if (isAr) "توفير البيانات" else "Data Save",
-                color = Color.White.copy(alpha = 0.8f),
-                fontSize = 11.sp
-            )
-            Switch(
-                checked = isSaving,
-                onCheckedChange = { viewModel.toggleDataSavingMode() },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                    uncheckedThumbColor = Color.LightGray,
-                    uncheckedTrackColor = Color.DarkGray
-                ),
-                modifier = Modifier.scale(0.6f)
-            )
-            IconButton(
-                onClick = { viewModel.setOnlineStatus(!isOnline) },
-                modifier = Modifier.size(24.dp)
-            ) {
-                Icon(
-                    imageVector = if (isOnline) Icons.Default.Wifi else Icons.Default.WifiOff,
-                    contentDescription = "Simulate Offline Toggle",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
-        }
-    }
-}
-
-// Helper image loader matching data-save parameters
-@Composable
-fun NiceImage(url: String, contentDescription: String, modifier: Modifier, dataSaving: Boolean) {
-    val req = ImageRequest.Builder(LocalContext.current)
-        .data(url)
-        .crossfade(true)
-        .let { if (dataSaving) it.size(80) else it }
-        .build()
-
-    AsyncImage(
-        model = req,
-        contentDescription = contentDescription,
-        contentScale = ContentScale.Crop,
-        modifier = modifier
-    )
-}
-
-// -------------------------------------------------------------
-// 1. HOME SCREEN (With Slideshow, Custom Text Panel, Recommended Category)
-// -------------------------------------------------------------
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun HomeScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val settings by viewModel.settings.collectAsState()
-    val categories by viewModel.categories.collectAsState()
-    val banners by viewModel.banners.collectAsState()
-    val isSaving by viewModel.isDataSavingMode.collectAsState()
-
-    val suggestedProviders = viewModel.getSuggestedBasedOnActivity()
-
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // Welcome Custom Header Customizable by Admin (Tapping 5 times invokes secure backdoor)
-        item {
-            val context = LocalContext.current
-            var tapCount by remember { mutableStateOf(0) }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(110.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable {
-                        tapCount++
-                        if (tapCount >= 5) {
-                            tapCount = 0
-                            viewModel.attemptLogin("WAM2026", "maher736462", true)
-                            android.widget.Toast.makeText(context, if (isAr) "عبر القناة السرية للآدمن WAM2026 تم الدخول بنجاح!" else "Bypassed securely to WAM2026 Admin Panel View!", android.widget.Toast.LENGTH_LONG).show()
-                            viewModel.navigateTo("admin_panel")
+                        // Icon 2: LOGIN (🔐)
+                        IconButton(
+                            onClick = { viewModel.navigateTo("login") }
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = "Login Pane",
+                                tint = if (currentScreen == "login" || currentScreen == "admin") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.size(23.dp)
+                            )
                         }
-                    }
-            ) {
-                if (settings.welcomeBgUrl.isNotBlank()) {
-                    NiceImage(
-                        url = settings.welcomeBgUrl,
-                        contentDescription = "Welcome background",
-                        modifier = Modifier.fillMaxSize(),
-                        dataSaving = isSaving
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f))
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isAr) settings.welcomeText else settings.welcomeTextEn,
-                        fontSize = settings.welcomeTextSize.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = try {
-                            Color(android.graphics.Color.parseColor(settings.welcomeTextColorHex))
-                        } catch (_: Exception) {
-                            Color.White
-                        },
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-        }
 
-        // Action Banners carousel rotating via seconds specification
-        if (banners.isNotEmpty()) {
-            item {
-                Text(
-                    text = if (isAr) "العروض والاعلانات المتميزة" else "Premium Ads & Announcements",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
+                        // Icon 3: REGISTER (👤 ID Add)
+                        IconButton(
+                            onClick = { viewModel.navigateTo("register") }
+                        ) {
+                            Icon(
+                                Icons.Default.AddCircle,
+                                contentDescription = "Register",
+                                tint = if (currentScreen == "register") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
 
-                var bIndex by remember { mutableStateOf(0) }
-                val currentAd = banners[bIndex % banners.size]
-
-                LaunchedEffect(bIndex, currentAd) {
-                    delay(currentAd.durationSeconds * 1000L)
-                    bIndex++
-                }
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(130.dp)
-                        .clickable { viewModel.selectProvider(currentAd.redirectLink) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        NiceImage(
-                            url = currentAd.imageUrl,
-                            contentDescription = "Slide banner advertisement",
-                            modifier = Modifier.fillMaxSize(),
-                            dataSaving = isSaving
-                        )
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .background(Color.Black.copy(alpha = 0.6f))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        // Icon 4: GLOBE (🌐)
+                        IconButton(
+                            onClick = { onLanguageToggle() }
                         ) {
                             Text(
-                                text = if (currentAd.size == "Large") "رعاية ذهبية" else "عرض ترويجي",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 11.sp,
+                                text = "🌐",
+                                fontSize = 20.sp,
+                                modifier = Modifier.padding(2.dp)
+                            )
+                        }
+
+                        // Icon 5: REFRESH (🔄)
+                        IconButton(
+                            onClick = {
+                                viewModel.triggerRefresh()
+                                Toast.makeText(context, if (isAr) "تم تحديث البيانات الحية بنجاح!" else "Live lists updated!", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Sync",
+                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                // Screen Navigation Switch Page Router
+                Box(modifier = Modifier.weight(1f)) {
+                    when (currentScreen) {
+                        "home" -> HomeScreen(viewModel, t, isAr)
+                        "login" -> LoginScreen(viewModel, t, isAr)
+                        "register" -> RegistrationScreen(viewModel, t, isAr)
+                        "category" -> CategoryDetailsScreen(viewModel, t, isAr)
+                        "detail" -> ProviderDetailsScreen(viewModel, t, isAr)
+                        "admin" -> AdminPanelScreen(viewModel, t, isAr)
+                        "secret" -> SecretSettingsScreen(viewModel, t, isAr)
+                        else -> HomeScreen(viewModel, t, isAr)
+                    }
+                }
+
+                // Brand Interactive Customizable Sponsor Footer at bottom
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.clickable {
+                            // Easily dial sponsor
+                            val u = settings.footerText.filter { it.isDigit() }
+                            if (u.isNotBlank()) {
+                                try {
+                                    val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$u"))
+                                    context.startActivity(i)
+                                } catch (e: Exception) {
+                                    // Fallback
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Star,
+                            contentDescription = "Sponsor",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = settings.footerText,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            Icons.Default.Phone,
+                            contentDescription = "Dial Sponsor",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+
+            // Hidden Owner Backdoor Access Dialog
+            if (showBackdoorDialog) {
+                Dialog(onDismissRequest = { showBackdoorDialog = false }) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Secret Gateway",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(44.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = t["backdoor_dialog_title"] ?: "Secret Gateway",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = t["backdoor_dialog_desc"] ?: "Enter credentials",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = backdoorPasswordInput,
+                                onValueChange = { backdoorPasswordInput = it },
+                                label = { Text(t["password"] ?: "Password") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(20.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showBackdoorDialog = false },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (isAr) "إلغاء" else "Cancel")
+                                }
+                                Button(
+                                    onClick = {
+                                        if (backdoorPasswordInput == "maher--736462") {
+                                            showBackdoorDialog = false
+                                            backdoorPasswordInput = ""
+                                            viewModel.navigateTo("secret")
+                                            Toast.makeText(context, if (isAr) "مرحباً يا مالك التطبيق! تم الدخول بنجاح." else "Welcome Owner! Bypassed successfully.", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, if (isAr) "رمز المرور خاطئ!" else "Incorrect PIN!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1.5f)
+                                ) {
+                                    Text(t["backdoor_enter"] ?: "Access")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 1: HOME SCREEN
+// -------------------------------------------------------------
+@Composable
+fun HomeScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val categories by viewModel.categories.collectAsState()
+    val providers by viewModel.providers.collectAsState()
+    val settings by viewModel.appSettings.collectAsState()
+
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Filter providers that are recommended
+    val recommendedProviders = remember(providers) {
+        providers.filter { it.isRecommended && it.status == "approved" }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 14.dp)
+    ) {
+        // Welcoming Card Header
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp)
+                ) {
+                    Text(
+                        text = settings.welcomeMessage,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        lineHeight = 22.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.primary,
+                                    shape = CircleShape
+                                )
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isAr) "نشط ومزامن" else "Live Ready",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onPrimary,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
             }
         }
 
-        // Categories original horizontal/grid Display
+        // Live Search Input Bar
         item {
-            Text(
-                text = if (isAr) "تصفح حسب الفئات والمهن" else "Browse Category & Professions",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
-        }
-
-        item {
-            val pinnedFirst = categories.sortedByDescending { it.isPinned }
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                pinnedFirst.forEach { category ->
-                    val isPinned = category.isPinned
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                if (isPinned) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .clickable { viewModel.selectCategory(category.id) }
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = if (isPinned) Icons.Default.PushPin else Icons.Default.Category,
-                                contentDescription = "Category item",
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isAr) category.nameAr else category.nameEn,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(18.dp))
-        }
-
-        // Smart Category Recommendation "مقترح لك" according to visits counts
-        item {
-            Text(
-                text = if (isAr) "🎯 مقترح خصيصاً لك (بناءً على نشاطك)" else "🎯 Personalized for You (Based on activity)",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
-        }
-
-        if (suggestedProviders.isEmpty()) {
-            item {
-                Text(
-                    text = if (isAr) "تصفح المهن لتوليد اقتراحات ذكية وفورية" else "Browse professions list to generate tailored recommendations.",
-                    fontSize = 12.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
-            }
-        } else {
-            items(suggestedProviders) { provider ->
-                MiniProviderCard(provider, viewModel, isAr, isSaving)
-            }
-        }
-
-        // Sharing action loyalty reward
-        item {
-            Spacer(modifier = Modifier.height(12.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Share, "Share application", tint = MaterialTheme.colorScheme.secondary)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1.5f)) {
-                        Text(
-                            text = if (isAr) "شارك التطبيق لربح 20 نقطة" else "Share App for 20 Coins",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = if (isAr) "انشر دليل دليلي مع أصدقائك للحصول على مكافآت فورية." else "Gift rewards by sharing local directory with peers.",
-                            fontSize = 11.sp
-                        )
-                    }
-                    Button(
-                        onClick = { viewModel.shareAppAction() },
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(if (isAr) "مشاركة" else "Share", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun MiniProviderCard(provider: Provider, viewModel: DaliliViewModel, isAr: Boolean, isSaving: Boolean) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { viewModel.selectProvider(provider.id) },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-    ) {
-        Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                NiceImage(
-                    url = provider.personalPhotoUrl,
-                    contentDescription = "Suggested expert pic",
-                    modifier = Modifier
-                        .size(50.dp)
-                        .clip(RoundedCornerShape(8.dp)),
-                    dataSaving = isSaving
-                )
-                if (provider.isVerified) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .offset(2.dp, 2.dp)
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF3B82F6))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Verified badge icon",
-                            tint = Color.White,
-                            modifier = Modifier.size(10.dp).align(Alignment.Center)
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(provider.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Text(
-                    text = "${provider.city} • ${provider.neighborhood}",
-                    fontSize = 11.sp,
-                    color = Color.Gray
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Star, "Rating star", tint = Color(0xFFFBBF24), modifier = Modifier.size(14.dp))
-                Text(text = " ${provider.rating}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 2. PROVIDERS LIST SCREEN (With Circles Radius, Infinite Scroll)
-// -------------------------------------------------------------
-@Composable
-fun ProvidersListScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val settings by viewModel.settings.collectAsState()
-    val isSaving by viewModel.isDataSavingMode.collectAsState()
-    val query by viewModel.searchQuery.collectAsState()
-    val city by viewModel.searchCity.collectAsState()
-    val neighborhood by viewModel.searchNeighborhood.collectAsState()
-    val phone by viewModel.searchPhone.collectAsState()
-    val minRating by viewModel.searchRatingMin.collectAsState()
-    val radiusInput by viewModel.searchRadiusInput.collectAsState()
-    val pageSize by viewModel.pageSize.collectAsState()
-    val pageOffset by viewModel.currentPageOffset.collectAsState()
-
-    val filteredList = viewModel.getFilteredProviders()
-    val hasMore = viewModel.hasMoreFilteredData()
-
-    var showFiltersPanel by remember { mutableStateOf(false) }
-
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // High density Advanced Search Controls
-        OutlinedTextField(
-            value = query,
-            onValueChange = { viewModel.searchQuery.value = it },
-            placeholder = { Text(if (isAr) "ابحث باسم مقدم الخدمة أو الخدمة..." else "Search by name or keyword...") },
-            leadingIcon = { Icon(Icons.Default.Search, "Query Search") },
-            trailingIcon = {
-                IconButton(onClick = { showFiltersPanel = !showFiltersPanel }) {
-                    Icon(Icons.Default.FilterList, "Advanced Filters Tab")
-                }
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        )
-
-        AnimatedVisibility(visible = showFiltersPanel) {
-            Card(
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 6.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = city,
-                            onValueChange = { viewModel.searchCity.value = it },
-                            placeholder = { Text(if (isAr) "المدينة" else "City") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = neighborhood,
-                            onValueChange = { viewModel.searchNeighborhood.value = it },
-                            placeholder = { Text(if (isAr) "الحي" else "Neigh") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
+                    .padding(bottom = 14.dp),
+                placeholder = { Text(t["search_placeholder"] ?: "Search...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search icon") },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear search")
+                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = phone,
-                            onValueChange = { viewModel.searchPhone.value = it },
-                            placeholder = { Text(if (isAr) "رقم الهاتف" else "Phone") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = radiusInput,
-                            onValueChange = { viewModel.searchRadiusInput.value = it },
-                            placeholder = { Text(if (isAr) "دائرة البحث (كم) 📍" else "Radius Km 📍") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = if (isAr) "الحد الأدنى للتقييم: ${minRating}★" else "Min Rating: ${minRating}★",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Slider(
-                            value = minRating,
-                            onValueChange = { viewModel.searchRatingMin.value = it },
-                            valueRange = 0f..5f,
-                            steps = 4,
-                            modifier = Modifier.width(180.dp)
-                        )
-                    }
-                }
-            }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
+            )
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Infinite Scroll providers list view
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(filteredList) { provider ->
-                FullProviderCard(provider, viewModel, isAr, isSaving)
+        // Show Search Results if Search Query is active
+        if (searchQuery.isNotBlank()) {
+            val filtered = providers.filter {
+                (it.name.contains(searchQuery, ignoreCase = true) ||
+                        it.workAddress.contains(searchQuery, ignoreCase = true) ||
+                        it.district.contains(searchQuery, ignoreCase = true)) &&
+                        it.status == "approved"
             }
 
-            // Infinite Scrolling triggering button at bottom
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    if (hasMore) {
-                        Button(
-                            onClick = { viewModel.loadNextPage() },
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(if (isAr) "عرض المزيد من مقدمي الخدمات ➔" else "Load Next page page size ➔")
-                        }
-                    } else {
+            if (filtered.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = if (isAr) "تم تحميل جميع البيانات المتوفرة" else "All available records loaded",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = t["no_results"] ?: "No results",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
                             color = Color.Gray
                         )
                     }
                 }
+            } else {
+                items(filtered) { p ->
+                    ProviderCompactCard(p, categories, isAr) {
+                        viewModel.navigateToProvider(p.id)
+                    }
+                }
             }
-        }
-    }
-}
+        } else {
+            // "Recommended Providers" Section Slider
+            item {
+                Text(
+                    text = t["recommended"] ?: "Recommended Guides",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
 
-@Composable
-fun FullProviderCard(provider: Provider, viewModel: DaliliViewModel, isAr: Boolean, isSaving: Boolean) {
-    val context = LocalContext.current
-    val isPremium = provider.isPremium
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { viewModel.selectProvider(provider.id) },
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = if (isPremium) BorderStroke(2.dp, Color(0xFFD4AF37)) else null // Gold border for Premium
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    NiceImage(
-                        url = provider.personalPhotoUrl,
-                        contentDescription = "Expert Profile image",
+                if (recommendedProviders.isEmpty()) {
+                    Card(
                         modifier = Modifier
-                            .size(60.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        dataSaving = isSaving
-                    )
-                    if (provider.isVerified) {
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
                         Box(
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .offset(4.dp, 4.dp)
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF3B82F6))
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Verified badge icon",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp).align(Alignment.Center)
+                            Text(
+                                text = t["no_recommended"] ?: "No recommended",
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = provider.name,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        if (isPremium) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color(0xFFD4AF37))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = if (isAr) "ذهبي" else "Premium",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Black
-                                )
+                } else {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                    ) {
+                        items(recommendedProviders) { p ->
+                            RecommendedProviderCard(p, isAr) {
+                                viewModel.navigateToProvider(p.id)
                             }
                         }
-                    }
-
-                    Text(
-                        text = "📱 ${provider.phone} • ${provider.city}",
-                        fontSize = 12.sp,
-                        color = Color.Gray
-                    )
-
-                    Row(
-                        modifier = Modifier.padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Star, "Rating", tint = Color(0xFFFBBF24), modifier = Modifier.size(16.dp))
-                        Text(
-                            text = " ${provider.rating} (${provider.reviewCount} ${if (isAr) "تقييم" else "reviews"})",
-                            fontSize = 12.sp
-                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            // Categories Header List Grid
+            item {
+                Text(
+                    text = t["categories"] ?: "Categories",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${provider.phone}"))
-                        context.startActivity(dialIntent)
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.Phone, "Call icon", modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isAr) "اتصل الآن" else "Call Now", fontSize = 11.sp)
+            if (categories.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(strokeWidth = 3.dp)
+                    }
                 }
+            } else {
+                item {
+                    // Render custom grid logic to avoid multi-scroll nested crashes in LazyColumn
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val chunks = categories.chunked(2)
+                        for (chunk in chunks) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                for (cat in chunk) {
+                                    CategoryGridCard(
+                                        category = cat,
+                                        isAr = isAr,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        viewModel.navigateToCategory(cat.id)
+                                    }
+                                }
+                                if (chunk.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-                Button(
-                    onClick = { viewModel.openChatWith(provider.id) },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                ) {
-                    Icon(Icons.Default.Chat, "Chat icon", modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (isAr) "محادثة فورية" else "Live Chat", fontSize = 11.sp)
-                }
+            // Margin space
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// 3. PROVIDER DETAIL SCREEN (Form to Review, Redeem Coins, Appointments)
-// -------------------------------------------------------------
 @Composable
-fun ProviderDetailScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val isSaving by viewModel.isDataSavingMode.collectAsState()
-    val providers by viewModel.providers.collectAsState()
-    val reviews by viewModel.reviews.collectAsState()
-    val targetId by viewModel.selectedProviderId.collectAsState()
-    val myPoints by viewModel.userPoints.collectAsState()
-
-    val provider = providers.find { it.id == targetId } ?: return
-
-    var clientName by remember { mutableStateOf("") }
-    var ratingChosen by remember { mutableStateOf(5f) }
-    var reviewComment by remember { mutableStateOf("") }
-
-    var apptChosenDate by remember { mutableStateOf("") }
-
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-        item {
-            // Profile & Workspace Showcase banner
+fun CategoryGridCard(
+    category: Category,
+    isAr: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(130.dp)
+            .clickable { onClick() }
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            AsyncImage(
+                model = if (category.imageUrl.isBlank()) "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=300" else category.imageUrl,
+                contentDescription = category.nameAr,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1.5f),
+                contentScale = ContentScale.Crop
+            )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(150.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Gray)
+                    .weight(1f)
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center
             ) {
-                NiceImage(
-                    url = provider.workspacePhotoUrl,
-                    contentDescription = "Workspace catalog display",
-                    modifier = Modifier.fillMaxSize(),
-                    dataSaving = isSaving
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Professional description & Verification labels
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                NiceImage(
-                    url = provider.personalPhotoUrl,
-                    contentDescription = "Expert avatar thumbnail",
-                    modifier = Modifier
-                        .size(60.dp)
-                        .clip(CircleShape),
-                    dataSaving = isSaving
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(provider.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        if (provider.isVerified) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Icon(Icons.Default.Verified, "Verified Badge symbol", tint = Color(0xFF3B82F6))
-                        }
-                    }
-                    Text(
-                        text = "📍 ${provider.city} • ${provider.neighborhood}",
-                        fontSize = 13.sp,
-                        color = Color.LightGray
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            Divider(color = Color.DarkGray)
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        // LOYALTY POINTS REDEEM CORNER
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = if (isAr) "🎁 مركز استبدال نقاط الولاء" else "🎁 Loyalty Coins Redeem Center",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (isAr) {
-                            "نقاطك الحالية: $myPoints نقطة المتبقية. يتطلب الخصم ${provider.pointsRedeemOption} نقطة."
-                        } else {
-                            "Your current score is: $myPoints coins inside ledger. Requires ${provider.pointsRedeemOption} coins for discount."
-                        },
-                        fontSize = 12.sp
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = { viewModel.redeemGiftPoints(provider.id) },
-                        enabled = myPoints >= provider.pointsRedeemOption,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (isAr) "استبدال كوبون خصم 15%" else "Redeem discount Coupon (15%)")
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        // BOOK APPOINTMENTS FORM
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = if (isAr) "📅 جدولة حية وحجز موعد مباشر" else "📅 Book Direct Expert Appointment",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = apptChosenDate,
-                        onValueChange = { apptChosenDate = it },
-                        placeholder = { Text(if (isAr) "أدخل تاريخ ووقت الموعد (مثلاً غداً 4م)" else "Input meeting slot (Ex: Sat 4pm)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            if (apptChosenDate.isNotBlank()) {
-                                viewModel.bookAppointment(provider.id, apptChosenDate, "Scheduled Appointment")
-                                apptChosenDate = ""
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (isAr) "تأكيد حجز الموعد الفوري " else "Confirm Smart Booking Slot")
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        // SUBMIT DETAILED REVIEW OR FEEDBACK (Loyalty mechanism triggers points!)
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = if (isAr) "✍️ شارك تقييمك لربح 15 نقطة!" else "✍️ Rate & Comment for 15 Coins!",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = clientName,
-                        onValueChange = { clientName = it },
-                        placeholder = { Text(if (isAr) "اسمك الكامل" else "Your Full Name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (isAr) "التقييم بالنجوم: " else "Stars choice: ")
-                        Slider(
-                            value = ratingChosen,
-                            onValueChange = { ratingChosen = it },
-                            valueRange = 1f..5f,
-                            steps = 3,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(" ${ratingChosen.toInt()}★", fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = reviewComment,
-                        onValueChange = { reviewComment = it },
-                        placeholder = { Text(if (isAr) "اكتب تعليقاً ووصفاً لتجربتك الفنية الحقيقية..." else "Describe product craftsmanship or technical support experience...") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = {
-                            if (clientName.isNotBlank() && reviewComment.isNotBlank()) {
-                                viewModel.submitReview(provider.id, clientName, ratingChosen, reviewComment)
-                                clientName = ""
-                                reviewComment = ""
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (isAr) "إرسال التقييم واستباق المكافآت" else "Submit review rating")
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-        }
-
-        // REVIEWS & FEEDBACK COMPENDIUM
-        item {
-            Text(
-                text = if (isAr) "سجل آراء وتقييمات العملاء" else "Historical Reviews directory",
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-
-        val targetReviews = reviews.filter { it.providerId == provider.id }
-        if (targetReviews.isEmpty()) {
-            item {
                 Text(
-                    text = if (isAr) "لا يوجد تعليقات سابقة حتى الآن لهذا الحساب." else "No reviews recorded yet for this provider.",
-                    fontSize = 12.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(vertical = 12.dp)
+                    text = if (isAr) category.nameAr else category.nameEn,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-            }
-        } else {
-            items(targetReviews) { review ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            Text(review.userName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text("★ ${review.rating}", fontWeight = FontWeight.Bold)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(review.comment, fontSize = 12.sp)
-                    }
-                }
             }
         }
     }
 }
 
-// -------------------------------------------------------------
-// 4. CHAT SYSTEM SCREEN (Supervised by Admin)
-// -------------------------------------------------------------
 @Composable
-fun ChatScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val currentRoom by viewModel.activeRoomId.collectAsState()
-    val chatRooms by viewModel.chatRooms.collectAsState()
-    val messagesList = viewModel.getActiveRoomMessages()
-
-    val roomInfo = chatRooms.find { it.id == currentRoom } ?: return
-
-    var chatTextInput by remember { mutableStateOf("") }
-
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // Chat Header with status indicators
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(
-                        Icons.Default.Person,
-                        "Avatar of provider",
-                        modifier = Modifier.align(Alignment.Center),
-                        tint = Color.White
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Column {
-                    Text(roomInfo.providerName, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = if (roomInfo.isMuted) "تم كتمك بواسطة الإدارة ⚠️" else "نشط الآن",
-                        color = if (roomInfo.isMuted) Color.Red else Color.Green,
-                        fontSize = 11.sp
-                    )
-                }
-            }
-
-            Row {
-                IconButton(onClick = { viewModel.navigateTo("providers_list") }) {
-                    Icon(Icons.Default.ArrowBack, "Back to service providers")
-                }
-            }
-        }
-
-        // Messages list space
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 10.dp)
-        ) {
-            items(messagesList) { msg ->
-                val isSelf = msg.senderId == "user"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (isSelf) Arrangement.End else Arrangement.Start
-                ) {
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelf) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.secondaryContainer
-                        ),
-                        modifier = Modifier.widthIn(max = 260.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                text = msg.senderName,
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(msg.message, fontSize = 13.sp)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Interactive chat text controls
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = chatTextInput,
-                onValueChange = { chatTextInput = it },
-                placeholder = { Text(if (roomInfo.isMuted) "تم إيقاف المراسلة كإجراء تأديب مؤقت" else "اكتب تفاصيل استفسارك الفني...") },
-                enabled = !roomInfo.isMuted,
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            IconButton(
-                onClick = {
-                    if (chatTextInput.isNotBlank()) {
-                        viewModel.sendChatMessage(chatTextInput)
-                        chatTextInput = ""
-                    }
-                },
-                enabled = !roomInfo.isMuted && chatTextInput.isNotBlank()
-            ) {
-                Icon(Icons.Default.Send, "Send chat dialog")
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 5. INVOICES SCREEN (Check Pending bills & Pay option)
-// -------------------------------------------------------------
-@Composable
-fun InvoicesScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val invoicesList by viewModel.invoices.collectAsState()
-    val mailAddress by viewModel.currentUserEmail.collectAsState()
-
-    var userMailInput by remember { mutableStateOf(mailAddress) }
-    var serviceSumDigit by remember { mutableStateOf("") }
-    var serviceNotesInput by remember { mutableStateOf("") }
-
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        item {
-            Text(
-                text = if (isAr) "📝 الفواتير والذمم المالية الصادرة" else "📝 Issued Digital Bills",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = if (isAr) "إدارة فواتير ومعاملات الصيانة" else "Track financial logs of service providers transactions",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
-            )
-            Spacer(modifier = Modifier.height(14.dp))
-        }
-
-        // PROVIDER ACTION CARD TO CREATE INVOICE
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = if (isAr) "➕ إصدار فاتورة فنية جديدة للعميل" else "➕ Issue New Digital Bill to user",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = userMailInput,
-                        onValueChange = { userMailInput = it },
-                        placeholder = { Text(if (isAr) "عنوان بريد العميل" else "User Email address") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = serviceSumDigit,
-                            onValueChange = { serviceSumDigit = it },
-                            placeholder = { Text(if (isAr) "القيمة مالي (دينار)" else "Amount (JOD)") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = serviceNotesInput,
-                            onValueChange = { serviceNotesInput = it },
-                            placeholder = { Text(if (isAr) "أعمال فنية منجزة" else "Service items done") },
-                            modifier = Modifier.weight(1.5f),
-                            singleLine = true
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = {
-                            val sum = serviceSumDigit.toDoubleOrNull() ?: 10.0
-                            if (userMailInput.isNotBlank() && serviceNotesInput.isNotBlank()) {
-                                viewModel.providerCreateInvoice(userMailInput, sum, serviceNotesInput)
-                                serviceSumDigit = ""
-                                serviceNotesInput = ""
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (isAr) "إصدار وحفظ الفاتورة الرقمية الحية" else "Issue and record bill invoice")
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(18.dp))
-        }
-
-        val myInvoices = invoicesList.filter { it.userEmail.equals(mailAddress, ignoreCase = true) }
-        if (myInvoices.isEmpty()) {
-            item {
-                Text(
-                    text = if (isAr) "لا يوجد أي فواتير ذمم مستحقة الدفع لك حالياً." else "You do not have any pending bills or historical invoices.",
-                    fontSize = 12.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
-            }
-        } else {
-            items(myInvoices) { bill ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(bill.providerName, fontWeight = FontWeight.Bold)
-                            Text(bill.serviceDetails, fontSize = 12.sp, color = Color.Gray)
-                            Text(
-                                "المبلغ: ${bill.amount} JOD • الحالة: ${bill.status}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (bill.status == "Paid") Color(0xFF16A34A) else Color(0xFFF59E0B)
-                            )
-                        }
-
-                        if (bill.status == "Pending") {
-                            Button(
-                                onClick = { viewModel.payInvoice(bill.id) },
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(if (isAr) "سداد الآن" else "Pay Now", fontSize = 11.sp)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 6. SMART AI BOT SCREEN (Works Online/Offline, Pre-saved FAQs)
-// -------------------------------------------------------------
-@Composable
-fun SmartBotScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val messages by viewModel.smartAssistantMessages.collectAsState()
-    var userPromptText by remember { mutableStateOf("") }
-
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-        ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Text(
-                    text = if (isAr) "🤖 المساعد الفني لخدمات دليلي" else "🤖 Dalili Directory Smart Bot",
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = if (isAr) "يجيبك في ثوانٍ! يعمل أونلاين لمطابقة أسئلة Firestore ومحلياً لمساعدتك." else "Gives instant replies using verified Firestore manuals offline and online",
-                    fontSize = 11.sp
-                )
-            }
-        }
-
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 10.dp)
-        ) {
-            items(messages) { msg ->
-                val isBot = msg.senderId == "assistant"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (isBot) Arrangement.Start else Arrangement.End
-                ) {
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isBot) MaterialTheme.colorScheme.surfaceVariant
-                            else MaterialTheme.colorScheme.primaryContainer
-                        ),
-                        modifier = Modifier.widthIn(max = 280.dp)
-                    ) {
-                        Text(
-                            text = msg.message,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(8.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = userPromptText,
-                onValueChange = { userPromptText = it },
-                placeholder = { Text(if (isAr) "مثال: كيف أوثق السجل التجاري الحرفي؟" else "Ask: How to verify account details?") },
-                modifier = Modifier.weight(1f),
-                singleLine = true
-            )
-            IconButton(
-                onClick = {
-                    if (userPromptText.isNotBlank()) {
-                        viewModel.sendSmartAssistantMessage(userPromptText)
-                        userPromptText = ""
-                    }
-                },
-                enabled = userPromptText.isNotBlank()
-            ) {
-                Icon(Icons.Default.Send, "Submit prompt")
-            }
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 7. ADMIN PANEL PANEL (Themes, Verifications, Banners, Backups)
-// -------------------------------------------------------------
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun AdminPanelScreen(viewModel: DaliliViewModel, isAr: Boolean) {
-    val settings by viewModel.settings.collectAsState()
-    val providersList by viewModel.providers.collectAsState()
-    val verifications by viewModel.verifications.collectAsState()
-    val chatRooms by viewModel.chatRooms.collectAsState()
-    val auditLogs by viewModel.activityLogs.collectAsState()
-    val currentRole by viewModel.currentUserRole.collectAsState()
-
-    var customPrimaryColorField by remember { mutableStateOf(settings.primaryColorHex) }
-    var bannerImgInput by remember { mutableStateOf("") }
-    var bannerRedirectInput by remember { mutableStateOf("") }
-    var bannerDurationSec by remember { mutableStateOf("6") }
-
-    var backupFolderInput by remember { mutableStateOf("/storage/emulated/0/DaliliBackups/") }
-
-    var usernameInput by remember { mutableStateOf("") }
-    var passwordInput by remember { mutableStateOf("") }
-    var rememberMeState by remember { mutableStateOf(false) }
-    var loginErrorState by remember { mutableStateOf("") }
-
-    if (currentRole == "Guest") {
+fun RecommendedProviderCard(
+    provider: Provider,
+    isAr: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .width(180.dp)
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
+            modifier = Modifier.padding(12.dp)
         ) {
-            Card(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                    .height(90.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            ) {
+                AsyncImage(
+                    model = provider.personalPhotoUrl,
+                    contentDescription = provider.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                // Pinned badge inside layout
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopEnd)
+                        .background(Color(0xFFFFD700), shape = RoundedCornerShape(4.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text("⭐", fontSize = 9.sp)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = provider.name,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+            Text(
+                text = provider.district,
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("⭐", fontSize = 10.sp)
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                    text = "${provider.rating} (${provider.reviewCount})",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ProviderCompactCard(
+    provider: Provider,
+    categories: List<Category>,
+    isAr: Boolean,
+    onClick: () -> Unit
+) {
+    val categoryName = remember(provider.categoryId, categories) {
+        val c = categories.find { it.id == provider.categoryId }
+        if (c != null) (if (isAr) c.nameAr else c.nameEn) else ""
+    }
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = provider.personalPhotoUrl,
+                contentDescription = provider.name,
+                modifier = Modifier
+                    .size(65.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = ContentScale.Crop
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = provider.name,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    if (provider.isPinned) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0xFFE2C412), shape = RoundedCornerShape(4.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(if (isAr) "مثبّت" else "Pinned", fontSize = 8.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                Text(
+                    text = "$categoryName • ${provider.district}",
+                    fontSize = 11.sp,
+                    color = Color.Gray
+                )
+                Text(
+                    text = provider.workAddress,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Column(
+                horizontalAlignment = Alignment.End
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("⭐", fontSize = 11.sp)
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("${provider.rating}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("(${provider.reviewCount})", fontSize = 10.sp, color = Color.Gray)
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 2: LOGIN SCREEN
+// -------------------------------------------------------------
+@Composable
+fun LoginScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val role by viewModel.currentRole.collectAsState()
+    val usernameState by viewModel.currentUsername.collectAsState()
+    val context = LocalContext.current
+
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (role != "Guest") {
+            // Already Logged-in view
+            Card(
                 shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Icon(
-                        Icons.Default.Lock,
-                        contentDescription = "Admin Area Guard",
-                        modifier = Modifier.size(64.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = if (isAr) "دخول الإدارة واللوحة الرقابية" else "Admin & Supervisor Authentication",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
-                    OutlinedTextField(
-                        value = usernameInput,
-                        onValueChange = { usernameInput = it },
-                        label = { Text(if (isAr) "اسم المستخدم" else "Username") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        Icons.Default.CheckCircle,
+                        contentDescription = "Success",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(54.dp)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    
-                    OutlinedTextField(
-                        value = passwordInput,
-                        onValueChange = { passwordInput = it },
-                        label = { Text(if (isAr) "كلمة المرور" else "Password") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()
+                    Text(
+                        text = if (role == "Admin") t["admin_logged"] ?: "" else t["super_logged"] ?: "",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
                     )
-                    
-                    if (loginErrorState.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "${t["username"]}: $usernameState",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { viewModel.navigateTo("admin") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(t["admin_panel"] ?: "Admin Panel")
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.logout() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                    ) {
+                        Text(t["logout"] ?: "Logout")
+                    }
+                }
+            }
+        } else {
+            // Standard username/password input form
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = t["admin_panel"] ?: "Security Access Control",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isAr) "تسجيل الدخول للمدير والأوصياء والمشرفين" else "Admin and supervisor portal access",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text(t["username"] ?: "Username") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text(t["password"] ?: "Password") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = {
+                            val success = viewModel.login(username, password)
+                            if (success) {
+                                username = ""
+                                password = ""
+                                Toast.makeText(context, if (isAr) "تم المصادقة بنجاح!" else "Authenticated successfully!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, t["invalid_login"], Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(t["login_btn"] ?: "Log In")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 3: DETAILED PROFESSIONAL REGISTRATION FORM (👤)
+// -------------------------------------------------------------
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RegistrationScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val categories by viewModel.categories.collectAsState()
+    val context = LocalContext.current
+
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf<Category?>(null) }
+    var workAddress by remember { mutableStateOf("") }
+    var district by remember { mutableStateOf("") }
+    var gpsCoordinates by remember { mutableStateOf("") }
+    var personalPhotoUrl by remember { mutableStateOf("") }
+    var idCardPhotoUrl by remember { mutableStateOf("") }
+
+    var expandedDropdown by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Text(
+                text = t["register"] ?: "Professional Registrations",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = if (isAr) "انضم إلى دليل الموثوقين الموحد. سيتم تدقيق ومراجعة طلبك فوراً من الإدارة." else "Join our service provider almanac today.",
+                fontSize = 12.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(top = 4.dp, bottom = 10.dp)
+            )
+        }
+
+        // Demo Autofill tool button
+        item {
+            FilledTonalButton(
+                onClick = {
+                    name = "م. ماهر محمد طاهر"
+                    phone = "777644670"
+                    if (categories.isNotEmpty()) {
+                        selectedCategory = categories.first()
+                    }
+                    workAddress = "شارع حدة - برج السلام"
+                    district = "مديرية السبعين"
+                    gpsCoordinates = "15.3694, 44.1910"
+                    personalPhotoUrl = "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=200"
+                    idCardPhotoUrl = "https://images.unsplash.com/photo-1554774853-aae0a22c8aa4?w=300"
+                    Toast.makeText(context, if (isAr) "تم ملء الاستمارة التجريبية بنجاح!" else "Demo values autofilled!", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Star, contentDescription = "Demo generator")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(t["use_demo_images"] ?: "Autofill Demo File")
+            }
+        }
+
+        // Form Fields
+        item {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(t["triple_name"] ?: "Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                label = { Text(t["phone"] ?: "Phone") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Category Selector Dropdown Menu
+        item {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                ExposedDropdownMenuBox(
+                    expanded = expandedDropdown,
+                    onExpandedChange = { expandedDropdown = !expandedDropdown }
+                ) {
+                    OutlinedTextField(
+                        value = if (selectedCategory != null) (if (isAr) selectedCategory!!.nameAr else selectedCategory!!.nameEn) else "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text(t["select_cat"] ?: "Select Category") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expandedDropdown,
+                        onDismissRequest = { expandedDropdown = false }
+                    ) {
+                        categories.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(if (isAr) cat.nameAr else cat.nameEn) },
+                                onClick = {
+                                    selectedCategory = cat
+                                    expandedDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            OutlinedTextField(
+                value = workAddress,
+                onValueChange = { workAddress = it },
+                label = { Text(t["work_address"] ?: "Address") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = district,
+                onValueChange = { district = it },
+                label = { Text(t["district"] ?: "District") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = gpsCoordinates,
+                onValueChange = { gpsCoordinates = it },
+                label = { Text(t["gps"] ?: "GPS Connection") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = personalPhotoUrl,
+                onValueChange = { personalPhotoUrl = it },
+                label = { Text(t["personal_photo"] ?: "Photo url") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = idCardPhotoUrl,
+                onValueChange = { idCardPhotoUrl = it },
+                label = { Text(t["id_card"] ?: "ID url") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Button(
+                onClick = {
+                    if (name.isBlank() || phone.isBlank() || selectedCategory == null || workAddress.isBlank() || district.isBlank() || personalPhotoUrl.isBlank()) {
+                        Toast.makeText(context, t["fill_required"], Toast.LENGTH_LONG).show()
+                    } else {
+                        viewModel.submitProfessionalRequest(
+                            name = name,
+                            phone = phone,
+                            categoryId = selectedCategory!!.id,
+                            workAddress = workAddress,
+                            district = district,
+                            gpsCoordinates = gpsCoordinates,
+                            personalPhotoUrl = personalPhotoUrl,
+                            idCardPhotoUrl = idCardPhotoUrl
+                        )
+                        // Clear
+                        name = ""
+                        phone = ""
+                        selectedCategory = null
+                        workAddress = ""
+                        district = ""
+                        gpsCoordinates = ""
+                        personalPhotoUrl = ""
+                        idCardPhotoUrl = ""
+                        Toast.makeText(context, t["req_success"], Toast.LENGTH_LONG).show()
+                        viewModel.navigateTo("home")
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text(
+                    text = t["submit_req"] ?: "Register Now",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 4: CATEGORY DETAILS SCREEN (LISTING WITH PIN/SORT VALUE)
+// -------------------------------------------------------------
+@Composable
+fun CategoryDetailsScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val categoryId by viewModel.selectedCategoryId.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val providers by viewModel.providers.collectAsState()
+
+    val currentCat = remember(categoryId, categories) {
+        categories.find { it.id == categoryId }
+    }
+
+    // Filter, sort pinned first
+    val catProviders = remember(categoryId, providers) {
+        providers.filter { it.categoryId == categoryId && it.status == "approved" }
+            .sortedByDescending { it.isPinned }
+    }
+
+    if (currentCat == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Category not found")
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp)
+        ) {
+            // Header display
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 12.dp)
+            ) {
+                IconButton(onClick = { viewModel.navigateTo("home") }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Column {
+                    Text(
+                        text = if (isAr) currentCat.nameAr else currentCat.nameEn,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${catProviders.size} ${if (isAr) "مقدم خدمة مسجل" else "providers registered"}",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+
+            if (catProviders.isEmpty()) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (isAr) "لا يوجد مقدمو خدمات في هذا القسم حالياً." else "No providers listed in this category yet.",
+                        color = Color.Gray,
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(catProviders) { p ->
+                        ProviderCompactCard(p, categories, isAr) {
+                            viewModel.navigateToProvider(p.id)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 5: PROVIDER DETAILS SCREEN WITH REVIEWS ADDITION
+// -------------------------------------------------------------
+@Composable
+fun ProviderDetailsScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val providerId by viewModel.selectedProviderId.collectAsState()
+    val providers by viewModel.providers.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val reviews by viewModel.reviews.collectAsState()
+
+    val context = LocalContext.current
+
+    val provider = remember(providerId, providers) {
+        providers.find { it.id == providerId } ?: providers.find { it.id == providerId }
+    }
+
+    val providerReviews = remember(providerId, reviews) {
+        reviews.filter { it.providerId == providerId }
+    }
+
+    // Interactive review additions inputs state
+    var reviewUserName by remember { mutableStateOf("") }
+    var reviewRating by remember { mutableFloatStateOf(5.0f) }
+    var reviewComment by remember { mutableStateOf("") }
+
+    // Visual image zoom overlays
+    var zoomedImageUrl by remember { mutableStateOf<String?>(null) }
+
+    if (provider == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    } else {
+        val categoryName = remember(provider.categoryId, categories) {
+            val c = categories.find { it.id == provider.categoryId }
+            if (c != null) (if (isAr) c.nameAr else c.nameEn) else ""
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Header Page Title
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { viewModel.navigateTo("home") }) {
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = loginErrorState,
-                            color = MaterialTheme.colorScheme.error,
-                            fontSize = 12.sp,
+                            text = if (isAr) "تفاصيل الحساب المهني للمزود" else "Professional Profile",
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
+                }
+
+                // Profile card block
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Checkbox(
-                            checked = rememberMeState,
-                            onCheckedChange = { rememberMeState = it }
-                        )
-                        Text(
-                            text = if (isAr) "حفظ تسجيل الدخول (سنتذكر الجلسة)" else "Remember Login State",
-                            fontSize = 13.sp
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(20.dp))
-                    
-                    Button(
-                        onClick = {
-                            val success = viewModel.attemptLogin(usernameInput, passwordInput, rememberMeState)
-                            if (success) {
-                                loginErrorState = ""
-                            } else {
-                                loginErrorState = if (isAr) "اسم المستخدم أو كلمة المرور غير صحيحة!" else "Incorrect credentials entered!"
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text(if (isAr) "تسجيل الدخول الآمن" else "Secure Admin Login")
-                    }
-                }
-            }
-        }
-        return
-    }
-
-    // Default to security if Supervisor, otherwise themes
-    var selectedAdminOption by remember { mutableStateOf(if (currentRole == "Supervisor") "security" else "themes") }
-
-    LazyColumn(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (isAr) "🛠️ لوحة تحكم الإدارة (${if (currentRole == "Supervisor") "مشرف" else "مدير"})" else "🛠️ Control Center (${currentRole})",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Button(
-                    onClick = { viewModel.logout() },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(if (isAr) "خروج" else "Logout", fontSize = 11.sp)
-                }
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Sub tabs for clean visual architecture
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                val menu = if (currentRole == "Supervisor") {
-                    listOf(
-                        "security" to (if (isAr) "التوثيق والقبول" else "Approvals"),
-                        "add_provider" to (if (isAr) "إضافة مقدم خدمة" else "Add Provider")
-                    )
-                } else {
-                    listOf(
-                        "themes" to (if (isAr) "الواجهة والسمات" else "System Interface"),
-                        "banners" to (if (isAr) "الإعلانات" else "Banners Slider"),
-                        "security" to (if (isAr) "التوثيق والقبول" else "Verifications"),
-                        "supervisors" to (if (isAr) "أعضاء الإشراف" else "Supervisors"),
-                        "backup" to (if (isAr) "النسخ الاحتياطي" else "Backups"),
-                        "chats" to (if (isAr) "مراقبة الدردشات" else "Chats Audit"),
-                        "logs" to (if (isAr) "سجل العمليات" else "Action Logs")
-                    )
-                }
-                menu.forEach { (key, label) ->
-                    Box(
-                        modifier = Modifier
-                            .padding(vertical = 2.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (selectedAdminOption == key) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .clickable { selectedAdminOption = key }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            Divider(color = Color.DarkGray)
-            Spacer(modifier = Modifier.height(12.dp))
-        }
-
-        // Sub control sections
-        when (selectedAdminOption) {
-            "themes" -> item {
-                // Application central themes customizable options
-                Text(if (isAr) "تخصيص ألوان وسمة الأجهزة فورياً" else "Instant Color synchronicity preferences", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-
-                val themes = listOf("Cosmic Slate", "Charcoal Gold", "Royal Emerald")
-                themes.forEach { t ->
-                    Button(
-                        onClick = { viewModel.changeThemePreference(t, customPrimaryColorField) },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (settings.appTheme == t) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Text(t)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = customPrimaryColorField,
-                    onValueChange = { customPrimaryColorField = it },
-                    placeholder = { Text("مثال: Hex #FF5500") },
-                    label = { Text(if (isAr) "الرمز السداسي للون الأساسي للأجهزة" else "Primary color hex") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                // Greeting text modifier
-                var welcomeArText by remember { mutableStateOf(settings.welcomeText) }
-                var welcomeEnText by remember { mutableStateOf(settings.welcomeTextEn) }
-                var welcomeSize by remember { mutableStateOf(settings.welcomeTextSize.toString()) }
-                var welcomeColor by remember { mutableStateOf(settings.welcomeTextColorHex) }
-                var welcomeBgUrl by remember { mutableStateOf(settings.welcomeBgUrl) }
-                
-                Text(if (isAr) "تعديل الشعار الترحيبي العائم" else "Modify Welcome Banner", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = welcomeArText,
-                    onValueChange = { welcomeArText = it },
-                    label = { Text("نص الترحيب (عربي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = welcomeEnText,
-                    onValueChange = { welcomeEnText = it },
-                    label = { Text("نص الترحيب (إنجليزي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = welcomeSize,
-                    onValueChange = { welcomeSize = it },
-                    label = { Text("حجم الخط (sp)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = welcomeColor,
-                    onValueChange = { welcomeColor = it },
-                    label = { Text("لون الخط (Hex)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = welcomeBgUrl,
-                    onValueChange = { welcomeBgUrl = it },
-                    label = { Text("رابط الصورة الخلفية من الهاتف/الإنترنت") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        val sizeSp = welcomeSize.toFloatOrNull() ?: 22f
-                        viewModel.updateGreetingBanner(welcomeArText, welcomeEnText, sizeSp, welcomeColor, welcomeBgUrl)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "حفظ الترحيب وبثه فورياً" else "Save & live stream Welcome Banner")
-                }
-                
-                Spacer(modifier = Modifier.height(20.dp))
-                Divider()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Top-Bar Icons and Titles Customizer
-                var topArTitle by remember { mutableStateOf(settings.topBarTitleAr) }
-                var topEnTitle by remember { mutableStateOf(settings.topBarTitleEn) }
-                var topRefLblAr by remember { mutableStateOf(settings.refreshIconTitleAr) }
-                var topRefLblEn by remember { mutableStateOf(settings.refreshIconTitleEn) }
-                var topLangLblAr by remember { mutableStateOf(settings.languageIconTitleAr) }
-                var topLangLblEn by remember { mutableStateOf(settings.languageIconTitleEn) }
-                var topShowRef by remember { mutableStateOf(settings.showRefreshIcon) }
-                var topShowLang by remember { mutableStateOf(settings.showLanguageIcon) }
-
-                Text(if (isAr) "تخصيص أيقونات وأزرار الشريط العلوي" else "Customize Top-Bar Icons & Labels", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = topArTitle,
-                    onValueChange = { topArTitle = it },
-                    label = { Text("عنوان التطبيق العلوي (عربي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = topEnTitle,
-                    onValueChange = { topEnTitle = it },
-                    label = { Text("عنوان التطبيق العلوي (إنجليزي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = topRefLblAr,
-                    onValueChange = { topRefLblAr = it },
-                    label = { Text("نص تحت زر التحديث (عربي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = topRefLblEn,
-                    onValueChange = { topRefLblEn = it },
-                    label = { Text("نص تحت زر التحديث (إنجليزي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = topLangLblAr,
-                    onValueChange = { topLangLblAr = it },
-                    label = { Text("نص تحت زر اللغة (عربي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = topLangLblEn,
-                    onValueChange = { topLangLblEn = it },
-                    label = { Text("نص تحت زر اللغة (إنجليزي)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = topShowRef, onCheckedChange = { topShowRef = it })
-                    Text("عرض زر التحديث")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = topShowLang, onCheckedChange = { topShowLang = it })
-                    Text("عرض زر تبديل اللغة")
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        viewModel.updateTopBarOptions(
-                            topShowRef, topShowLang, settings.showThemeToggleIcon,
-                            topArTitle, topEnTitle,
-                            topRefLblAr, topRefLblEn,
-                            topLangLblAr, topLangLblEn
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "توزيع وتسمية أزرار الشريط العلوي" else "Apply Top-Bar Changes & Labels")
-                }
-                
-                Spacer(modifier = Modifier.height(20.dp))
-                Divider()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Floating Smart Assistant configuration and placement
-                var assistShow by remember { mutableStateOf(settings.showAssistant) }
-                var assistIconName by remember { mutableStateOf(settings.assistantIconName) }
-                var assistPos by remember { mutableStateOf(settings.assistantPosition) }
-
-                Text(if (isAr) "التحكم بالمساعد الذكي العائم" else "Smart Assistant Button Settings", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = assistShow, onCheckedChange = { assistShow = it })
-                    Text("إظهار المساعد العائم في الشاشات")
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("شكل الأيقونة:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                val iconsLst = listOf("SupportAgent", "Chat", "Help", "Support")
-                iconsLst.forEach { ic ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { assistIconName = ic }.padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = assistIconName == ic, onClick = { assistIconName = ic })
-                        Text(ic, fontSize = 13.sp)
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("موقع الأيقونة على الشاشة:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                val positionsLst = listOf("BottomRight", "BottomLeft", "TopRight", "TopLeft")
-                positionsLst.forEach { pos ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { assistPos = pos }.padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = assistPos == pos, onClick = { assistPos = pos })
-                        Text(pos, fontSize = 13.sp)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = { viewModel.updateAssistantConfig(assistShow, assistIconName, assistPos) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "حفظ موقع وشكل المساعد الذكي" else "Save Smart Assistant Settings")
-                }
-                
-                Spacer(modifier = Modifier.height(20.dp))
-                Divider()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // WAM777 Footer controls
-                var footerShow by remember { mutableStateOf(settings.showFooter) }
-                var footerTxt by remember { mutableStateOf(settings.footerText) }
-                var footerSzText by remember { mutableStateOf(settings.footerSize.toString()) }
-                var footerPositionState by remember { mutableStateOf(settings.footerPosition) }
-
-                Text(if (isAr) "التحكم في تذييل WAM777 وتحجيمه ومكانه" else "WAM777 Footer Configuration Panel", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = footerShow, onCheckedChange = { footerShow = it })
-                    Text("إظهار التذييل في الشاشة")
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = footerTxt,
-                    onValueChange = { footerTxt = it },
-                    label = { Text("النص المكتوب بالتذييل") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = footerSzText,
-                    onValueChange = { footerSzText = it },
-                    label = { Text("حجم خط التذييل (sp)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text("موقع التذييل:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                val footerPositions = listOf("Bottom", "Top")
-                footerPositions.forEach { pos ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { footerPositionState = pos }.padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = footerPositionState == pos, onClick = { footerPositionState = pos })
-                        Text(pos, fontSize = 13.sp)
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        val sz = footerSzText.toFloatOrNull() ?: 14f
-                        viewModel.updateFooterConfig(footerShow, footerTxt, sz, footerPositionState)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "تخصيص وحفظ تذييل الجهاز" else "Save Footer Settings")
-                }
-            }
-
-            "banners" -> item {
-                // Manage banner ads and sliders duration
-                Text(if (isAr) "إدارة اللافتات الإعلانية (Banners) في أعلى الصفحة" else "Advertising Banners Control Panel", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = bannerImgInput,
-                    onValueChange = { bannerImgInput = it },
-                    placeholder = { Text("مثال: https://images.unsplash.com/...") },
-                    label = { Text("رابط صورة اللافتة") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = bannerRedirectInput,
-                    onValueChange = { bannerRedirectInput = it },
-                    placeholder = { Text("مثال: ID لمزود الخدمة للتوجيه") },
-                    label = { Text("رابط توجيه المستخدم عند الضغط (معرف مقدم الخدمة)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = bannerDurationSec,
-                    onValueChange = { bannerDurationSec = it },
-                    placeholder = { Text("6") },
-                    label = { Text("مدة العرض التلقائي (بالثواني)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        val secs = bannerDurationSec.toIntOrNull() ?: 6
-                        if (bannerImgInput.isNotBlank()) {
-                            viewModel.addNewPromotionBanner(bannerImgInput, bannerRedirectInput, secs, "Medium")
-                            bannerImgInput = ""
-                            bannerRedirectInput = ""
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "توليد ونشر الإعلان فورياً" else "Create and spread advertising slide")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(if (isAr) "اللافتات المنشورة الحالية:" else "Active Banners:", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                val currentBanners by viewModel.banners.collectAsState()
-                if (currentBanners.isEmpty()) {
-                    Text(if (isAr) "لا توجد لافتات إعلانية نشطة حالياً." else "No active banner slides loaded.", color = Color.Gray, fontSize = 12.sp)
-                } else {
-                    currentBanners.forEach { ban ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text("الموجه للمعرف: ${ban.redirectLink}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("المدة: ${ban.durationSeconds} ثواني • الصنف: ${ban.size}", fontSize = 11.sp, color = Color.Gray)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Button(
-                                    onClick = { viewModel.removePromotionBanner(ban.id) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                                    modifier = Modifier.align(Alignment.End)
-                                ) {
-                                    Text(if (isAr) "حذف الإعلان" else "Remove", fontSize = 10.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            "security" -> {
-                // User identification requests & verified status allocation review
-                val pendingDocs = verifications.filter { it.status == "Pending" }
-                if (pendingDocs.isEmpty()) {
-                    item {
-                        Text(if (isAr) "لا توجد مستندات توثيق معلقة متبقية." else "No pending validation document requests registered.")
-                    }
-                } else {
-                    items(pendingDocs) { reqDoc ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Text(reqDoc.providerName, fontWeight = FontWeight.Bold)
-                                Text("نوع المستند: " + reqDoc.documentType, fontSize = 12.sp, color = Color.Gray)
-                                Text("الموقع المرفق: " + reqDoc.fileUrl, fontSize = 11.sp, color = Color.Gray)
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { viewModel.verifyProviderStatus(reqDoc.providerId, true) }) {
-                                        Text(if (isAr) "قبول وتوثيق علامة الحساب ✔" else "Certify & Badge Account ✔")
-                                    }
-                                    Button(
-                                        onClick = { viewModel.verifyProviderStatus(reqDoc.providerId, false) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                                    ) {
-                                        Text(if (isAr) "رفض المستند" else "Dismiss")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Active Providers Table for pinning & premium controls (Only for non-Supervisor roles)
-                if (currentRole != "Supervisor") {
-                    item {
-                        Spacer(modifier = Modifier.height(18.dp))
-                        Text(if (isAr) "توطين وتثبيت وتوصية مقدمي الخدمة:" else "Pin & Subscribe Provider Management:", fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-                    items(providersList) { prov ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(prov.name, fontWeight = FontWeight.Bold)
-                                            if (prov.isVerified) {
-                                                Icon(
-                                                    Icons.Default.CheckCircle,
-                                                    contentDescription = "Verified Badge",
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(16.dp).padding(start = 2.dp)
-                                                )
-                                            }
-                                        }
-                                        Text(prov.city + " • " + prov.neighborhood, fontSize = 11.sp, color = Color.Gray)
-                                    }
-                                    // Pinned & premium state chips
-                                    Row {
-                                        if (prov.isPinned) {
-                                            Box(modifier = Modifier.background(Color.Blue).padding(horizontal = 4.dp, vertical = 2.dp).clip(RoundedCornerShape(4.dp))) {
-                                                Text("Pinned", color = Color.White, fontSize = 9.sp)
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        if (prov.isPremium) {
-                                            Box(modifier = Modifier.background(Color(0xFFF59E0B)).padding(horizontal = 4.dp, vertical = 2.dp).clip(RoundedCornerShape(4.dp))) {
-                                                Text("Premium ⭐", color = Color.White, fontSize = 9.sp)
-                                            }
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Button(
-                                        onClick = { viewModel.togglePinProvider(prov.id) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = if (prov.isPinned) Color.DarkGray else MaterialTheme.colorScheme.primary),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(if (prov.isPinned) (if (isAr) "إلغاء تثبيت" else "Unpin") else (if (isAr) "تثبيت بالصدارة 📌" else "Pin at Peak"), fontSize = 10.sp)
-                                    }
-                                    Button(
-                                        onClick = { viewModel.toggleProviderPremium(prov.id) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = if (prov.isPremium) Color.Red else Color(0xFF16A34A)),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(if (prov.isPremium) (if (isAr) "وقف الاشتراك المميز" else "Disable Subscription") else (if (isAr) "منح شارة مميز ⭐" else "Grant Premium Badge"), fontSize = 10.sp)
-                                    }
-                                    Button(
-                                        onClick = { viewModel.deleteProvider(prov.id) },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                    ) {
-                                        Text(if (isAr) "حذف المزود" else "Delete Provider", fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            "add_provider" -> item {
-                var syncNewProvName by remember { mutableStateOf("") }
-                var syncNewProvPhone by remember { mutableStateOf("") }
-                var syncNewProvCity by remember { mutableStateOf("") }
-                var syncNewProvNeigh by remember { mutableStateOf("") }
-                var syncSelectedCatId by remember { mutableStateOf("") }
-                
-                val categories by viewModel.categories.collectAsState()
-                
-                Text(if (isAr) "إضافة مقدم خدمة جديد موثق ومثبت" else "Add raw service provider to directory", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(10.dp))
-                
-                OutlinedTextField(
-                    value = syncNewProvName,
-                    onValueChange = { syncNewProvName = it },
-                    label = { Text(if (isAr) "اسم مقدم الخدمة" else "Provider Name") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = syncNewProvPhone,
-                    onValueChange = { syncNewProvPhone = it },
-                    label = { Text(if (isAr) "رقم الهاتف" else "Phone Number") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = syncNewProvCity,
-                    onValueChange = { syncNewProvCity = it },
-                    label = { Text(if (isAr) "المدينة" else "City") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = syncNewProvNeigh,
-                    onValueChange = { syncNewProvNeigh = it },
-                    label = { Text(if (isAr) "الحي" else "Neighborhood") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                
-                Text(if (isAr) "اختر القسم الوظيفي:" else "Select Category:", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                categories.forEach { cat ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { syncSelectedCatId = cat.id }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = syncSelectedCatId == cat.id, onClick = { syncSelectedCatId = cat.id })
-                        Text(if (isAr) cat.nameAr else cat.nameEn, fontSize = 13.sp)
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        if (syncNewProvName.isNotBlank() && syncNewProvPhone.isNotBlank() && syncSelectedCatId.isNotBlank()) {
-                            viewModel.addNewApprovedProvider(
-                                name = syncNewProvName,
-                                phone = syncNewProvPhone,
-                                catId = syncSelectedCatId,
-                                city = syncNewProvCity.ifBlank { "عمان" },
-                                neigh = syncNewProvNeigh.ifBlank { "الجبيهة" }
-                            )
-                            syncNewProvName = ""
-                            syncNewProvPhone = ""
-                            syncNewProvCity = ""
-                            syncNewProvNeigh = ""
-                            // Switch view to security
-                            selectedAdminOption = "security"
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "حفظ وتوثيق المزود فورياً" else "Add Approved Provider")
-                }
-            }
-
-            "supervisors" -> item {
-                var syncNewModEmail by remember { mutableStateOf("") }
-                var syncNewModPass by remember { mutableStateOf("") }
-                val moderators by viewModel.moderators.collectAsState()
-                
-                Text(if (isAr) "إدارة وتعيين حسابات المشرفين المزامنة" else "Manage & appoint synchronized supervisors", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(10.dp))
-                
-                OutlinedTextField(
-                    value = syncNewModEmail,
-                    onValueChange = { syncNewModEmail = it },
-                    label = { Text(if (isAr) "البريد الإلكتروني / اسم مستخدم المشرف" else "Supervisor Username / Email") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = syncNewModPass,
-                    onValueChange = { syncNewModPass = it },
-                    label = { Text(if (isAr) "كلمة مرور المشرف" else "Supervisor Password") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        if (syncNewModEmail.isNotBlank() && syncNewModPass.isNotBlank()) {
-                            viewModel.addModeratorUser(syncNewModEmail, syncNewModPass)
-                            syncNewModEmail = ""
-                            syncNewModPass = ""
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "تعيين وإضافة المشرف الجديد" else "Register & Appoint Supervisor")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(if (isAr) "قائمة المشرفين المعتمدين الحالية:" else "Current active supervisors in registry:", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                if (moderators.isEmpty()) {
-                    Text(if (isAr) "لا توجد مشرفين نشطين مضافين." else "No active supervisors declared.", color = Color.Gray, fontSize = 12.sp)
-                } else {
-                    moderators.forEach { mod ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                AsyncImage(
+                                    model = provider.personalPhotoUrl,
+                                    contentDescription = provider.name,
+                                    modifier = Modifier
+                                        .size(80.dp)
+                                        .clip(CircleShape)
+                                        .clickable { zoomedImageUrl = provider.personalPhotoUrl },
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
                                 Column {
-                                    Text(mod.email, fontWeight = FontWeight.Bold)
-                                    Text("كلمة المرور: ${mod.passwordPlain}", fontSize = 12.sp, color = Color.Gray)
-                                }
-                                IconButton(onClick = { viewModel.deleteModeratorUser(mod.email) }) {
-                                    Icon(Icons.Default.Delete, "Delete Supervisor", tint = Color.Red)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            "backup" -> item {
-                // Scheduled task folder back-up simulations
-                Text(if (isAr) "تنزيل نسخة احتياق لقاعدة المعطيات" else "Create daily offline Firestore full snapshot backups", fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = backupFolderInput,
-                    onValueChange = { backupFolderInput = it },
-                    label = { Text("مجلد حفظ النسخ في التخزين") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Button(
-                    onClick = {
-                        viewModel.triggerFirestoreBackup(backupFolderInput)
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (isAr) "أخذ لقطة حفظ احتياطية فورية 📥" else "Execute system Firestore backup raw snapshot 📥")
-                }
-            }
-
-            "chats" -> {
-                // Supervisors audit screen to mute chat rooms
-                if (chatRooms.isEmpty()) {
-                    item {
-                        Text(if (isAr) "لا توجد غرف دردشة نشطة للمشتري والمزود للمراقبة حالياً." else "No active direct chat lines open in registry to supervise.")
-                    }
-                } else {
-                    items(chatRooms) { r ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text(text = "مزود الخدمة: ${r.providerName}", fontWeight = FontWeight.Bold)
-                                    Text(text = "العميل: ${r.userEmail}", fontSize = 11.sp)
-                                }
-
-                                Button(
-                                    onClick = { viewModel.toggleChatMute(r.id) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = if (r.isMuted) Color.Green else Color.DarkGray
+                                    Text(
+                                        text = provider.name,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 18.sp
                                     )
+                                    Text(
+                                        text = categoryName,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("⭐", fontSize = 12.sp)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "${provider.rating} (${provider.reviewCount} ${if (isAr) "تقييم" else "reviews"})",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 14.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant
+                            )
+
+                            // Contact Actions dial buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val i = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${provider.phone}"))
+                                            context.startActivity(i)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Cannot place dialler direct!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1.2f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853))
+                                ) {
+                                    Icon(Icons.Default.Call, contentDescription = "Call")
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(if (isAr) "اتصال هاتف" else "Dial Provider")
+                                }
+
+                                Button(
+                                    onClick = {
+                                        try {
+                                            // Launch WhatsApp
+                                            val wpUrl = "https://api.whatsapp.com/send?phone=${provider.phone}"
+                                            val i = Intent(Intent.ACTION_VIEW, Uri.parse(wpUrl))
+                                            context.startActivity(i)
+                                        } catch (e: Exception) {
+                                            // Fallback
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = "WhatsApp")
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("واتساب", color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Field description listing
+                item {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // District Location details
+                            Row {
+                                Text(
+                                    text = "${t["district"]}:  ",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(text = provider.district, fontSize = 13.sp)
+                            }
+                            // Address details
+                            Row {
+                                Text(
+                                    text = "${t["work_address"]}:  ",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Text(text = provider.workAddress, fontSize = 13.sp)
+                            }
+                            // GPS click connection link
+                            if (provider.gpsCoordinates.isNotBlank()) {
+                                Row(
+                                    modifier = Modifier.clickable {
+                                        try {
+                                            val i = Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse("geo:${provider.gpsCoordinates}?q=${provider.gpsCoordinates}")
+                                            )
+                                            context.startActivity(i)
+                                        } catch (e: Exception) {
+                                            // Web google maps link representation
+                                            val link = "https://www.google.com/maps/search/?api=1&query=${provider.gpsCoordinates}"
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
+                                        }
+                                    }
                                 ) {
                                     Text(
-                                        if (r.isMuted) {
-                                            if (isAr) "إلغاء كتم" else "Unmute"
-                                        } else {
-                                            if (isAr) "كتم الغرفة 🤐" else "Mute Participant"
-                                        },
-                                        fontSize = 11.sp
+                                        text = "${t["gps"]}:  ",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = provider.gpsCoordinates,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            "logs" -> {
-                // Access admin logging records
-                if (auditLogs.isEmpty()) {
+                // ID Card document image indicator
+                if (provider.idCardPhotoUrl.isNotBlank()) {
                     item {
-                        Text(if (isAr) "لا يوجد أي سجل فني للعمليات حالياً." else "No historical admin actions logged.")
-                    }
-                } else {
-                    items(auditLogs) { log ->
                         Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = if (isAr) log.actionAr else log.actionEn,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = if (isAr) "بطاقة الهوية والضمانات المهنية" else "Guarantees & ID Documentation",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
                                 )
-                                Text(
-                                    text = "مدير المداومة: ${log.modEmail}",
-                                    fontSize = 10.sp,
-                                    color = Color.LightGray
+                                Spacer(modifier = Modifier.height(6.dp))
+                                AsyncImage(
+                                    model = provider.idCardPhotoUrl,
+                                    contentDescription = "ID Card doc",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(130.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { zoomedImageUrl = provider.idCardPhotoUrl },
+                                    contentScale = ContentScale.Crop
                                 )
                             }
                         }
                     }
                 }
+
+                // Reviews Add Input Section
+                item {
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(
+                                text = t["add_review"] ?: "Submit ratings reviews",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            // Name input
+                            OutlinedTextField(
+                                value = reviewUserName,
+                                onValueChange = { reviewUserName = it },
+                                label = { Text(t["review_user"] ?: "Name") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            // Stars selector
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = if (isAr) "التقييم:" else "Rating: ", fontSize = 13.sp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                for (star in 1..5) {
+                                    val checked = star <= reviewRating
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = "$star stars selector",
+                                        tint = if (checked) Color(0xFFFFD700) else Color.Gray,
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clickable { reviewRating = star.toFloat() }
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            // Comments input text
+                            OutlinedTextField(
+                                value = reviewComment,
+                                onValueChange = { reviewComment = it },
+                                label = { Text(t["review_comment"] ?: "Review") },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 2
+                            )
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Button(
+                                onClick = {
+                                    if (reviewUserName.isBlank() || reviewComment.isBlank()) {
+                                        Toast.makeText(context, t["fill_required"], Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.addReview(provider.id, reviewUserName, reviewRating, reviewComment)
+                                        reviewUserName = ""
+                                        reviewComment = ""
+                                        reviewRating = 5.0f
+                                        Toast.makeText(context, if (isAr) "تم إرسال التقييم ونشره فوراً!" else "Review submitted successfully!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(t["review_submit"] ?: "Submit Reviews")
+                            }
+                        }
+                    }
+                }
+
+                // Reviews Listing
+                item {
+                    Text(
+                        text = t["reviews_title"] ?: "Reviews",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
+                if (providerReviews.isEmpty()) {
+                    item {
+                        Text(
+                            text = if (isAr) "لا توجد تقييمات لهذا المزود حالياً. كن أول من يكتب تقييماً!" else "No customer reviews yet. Write a review to build trust!",
+                            fontSize = 11.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(bottom = 16.dp)
+                        )
+                    }
+                } else {
+                    items(providerReviews) { r ->
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(text = r.userName, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Row {
+                                        for (st in 1..5) {
+                                            val col = if (st <= r.rating) Color(0xFFFFD700) else Color.LightGray
+                                            Icon(Icons.Default.Star, "star score", tint = col, modifier = Modifier.size(12.dp))
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(text = r.comment, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(30.dp))
+                }
+            }
+
+            // Image full screen dialog viewing zoom overlay
+            if (zoomedImageUrl != null) {
+                Dialog(onDismissRequest = { zoomedImageUrl = null }) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                    ) {
+                        Box(Modifier.fillMaxSize()) {
+                            AsyncImage(
+                                model = zoomedImageUrl,
+                                contentDescription = "Zoomed screen image file",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                            IconButton(
+                                onClick = { zoomedImageUrl = null },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(8.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), shape = CircleShape)
+                            ) {
+                                Icon(Icons.Default.Close, "Close overview Zoom image", tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 6: CONTROL ADVANCED PANELS SCREEN
+// -------------------------------------------------------------
+@Composable
+fun AdminPanelScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val role by viewModel.currentRole.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val pendingProviders by viewModel.pendingProviders.collectAsState()
+    val providers by viewModel.providers.collectAsState()
+    val supervisors by viewModel.supervisors.collectAsState()
+
+    val context = LocalContext.current
+
+    if (role == "Guest") {
+        // Guarded Access Screen
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                Icon(Icons.Default.Lock, "Shield guard", tint = Color.Red, modifier = Modifier.size(64.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = if (isAr) "عذراً، هذه اللوحة مخصصة للأفراد المعتمدين والمشرفين فقط" else "Access Unauthorized!",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { viewModel.navigateTo("login") }) {
+                    Text(t["login"] ?: "Go to Secure Login")
+                }
+            }
+        }
+    } else {
+        // High Quality Tab Manager Controls
+        var activeTab by remember { mutableIntStateOf(0) }
+        val tabs = remember(role, isAr) {
+            val baseList = mutableListOf(
+                t["tabs_requests"] ?: "Requests",
+                t["tabs_cats"] ?: "Categories",
+                t["tabs_direct_add"] ?: "Instant Add",
+                t["tabs_manage_prov"] ?: "Listing Manage"
+            )
+            if (role == "Admin") {
+                baseList.add(t["tabs_sups"] ?: "Supervisors")
+            }
+            baseList
+        }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Panel Header Banner with Logout
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = if (role == "Admin") t["admin_logged"] ?: "" else t["super_logged"] ?: "",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 15.sp
+                        )
+                        Text(
+                            text = if (isAr) "تغيرات حية وسريعة وقابلة للمزامنة" else "Live Synchronized Directory Engine",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.logout() },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text(t["logout"] ?: "Logout", fontSize = 11.sp)
+                    }
+                }
+            }
+
+            // Tabs Row
+            ScrollableTabRow(
+                selectedTabIndex = activeTab,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                tabs.forEachIndexed { index, label ->
+                    Tab(
+                        selected = activeTab == index,
+                        onClick = { activeTab = index },
+                        text = { Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                    )
+                }
+            }
+
+            // Current Active Tab layout Router
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(14.dp)
+            ) {
+                when (activeTab) {
+                    0 -> PendingRequestsTab(viewModel, pendingProviders, categories, isAr)
+                    1 -> CategoriesAdminTab(viewModel, categories, isAr)
+                    2 -> DirectAddProviderTab(viewModel, categories, isAr)
+                    3 -> ManageProvidersTab(viewModel, providers, categories, role == "Admin", isAr)
+                    4 -> if (role == "Admin") SupervisorsAdminTab(viewModel, supervisors, isAr) else Spacer(modifier = Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+}
+
+// Sub-Tab 1: Pending registration requests reviewer with image zoomable viewer
+@Composable
+fun PendingRequestsTab(
+    viewModel: DaliliViewModel,
+    requests: List<Provider>,
+    categories: List<Category>,
+    isAr: Boolean
+) {
+    var activeDetailsRequest by remember { mutableStateOf<Provider?>(null) }
+    var zoomedImageUrl by remember { mutableStateOf<String?>(null) }
+
+    if (activeDetailsRequest != null) {
+        // Detailed Request Overlay view
+        val r = activeDetailsRequest!!
+        val catName = categories.find { it.id == r.categoryId }?.let { if (isAr) it.nameAr else it.nameEn } ?: r.categoryId
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { activeDetailsRequest = null }) {
+                        Icon(Icons.Default.ArrowBack, "Back")
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(text = "طلب: ${r.name}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "رقم الهاتف والواتساب: ${r.phone}", fontSize = 13.sp)
+                        Text(text = "القسم المطلوب: $catName", fontSize = 13.sp)
+                        Text(text = "العنوان المهني: ${r.workAddress}", fontSize = 13.sp)
+                        Text(text = "مديرية الإقامة: ${r.district}", fontSize = 13.sp)
+                        Text(text = "إحداثيات GPS: ${r.gpsCoordinates}", fontSize = 13.sp)
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "الصورة الشخصية (تثبيت للتكبير)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        AsyncImage(
+                            model = r.personalPhotoUrl,
+                            contentDescription = "Personal Image Overview",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { zoomedImageUrl = r.personalPhotoUrl },
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    if (r.idCardPhotoUrl.isNotBlank()) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "صورة بطاقة الهوية (تثبيت للتكبير)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            AsyncImage(
+                                model = r.idCardPhotoUrl,
+                                contentDescription = "ID Card Overview",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { zoomedImageUrl = r.idCardPhotoUrl },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Action Accept/reject buttons
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            viewModel.acceptPendingRequest(r.id)
+                            activeDetailsRequest = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("قبول واعتماد", color = Color.White)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.rejectPendingRequest(r.id, "Rejected by administration review")
+                            activeDetailsRequest = null
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("رفض واستبعاد")
+                    }
+                }
+            }
+        }
+
+        // Expandable zoom dialog
+        if (zoomedImageUrl != null) {
+            Dialog(onDismissRequest = { zoomedImageUrl = null }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                ) {
+                    Box(Modifier.fillMaxSize()) {
+                        AsyncImage(
+                            model = zoomedImageUrl,
+                            contentDescription = "Zoomed screen image file on Admin Area",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                        IconButton(
+                            onClick = { zoomedImageUrl = null },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(8.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), shape = CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, "Close overview Zoom", tint = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // List pending requests
+        if (requests.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = if (isAr) "لا توجد طلبات تسجيل معلقة بانتظار المراجعة حالياً." else "No registrations waiting review.",
+                    color = Color.Gray,
+                    fontSize = 13.sp
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(requests) { req ->
+                    val catName = categories.find { it.id == req.categoryId }?.let { if (isAr) it.nameAr else it.nameEn } ?: req.categoryId
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { activeDetailsRequest = req },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = req.personalPhotoUrl,
+                                contentDescription = req.name,
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(6.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(req.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("القسم: $catName • سكن: ${req.district}", fontSize = 11.sp, color = Color.Gray)
+                                Text("جوال: ${req.phone}", fontSize = 11.sp)
+                            }
+                            Icon(Icons.Default.ArrowForward, contentDescription = "View Details spec")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Sub-Tab 2: Categories hierarchy adder administration (إدارة الأقسام)
+@Composable
+fun CategoriesAdminTab(
+    viewModel: DaliliViewModel,
+    categories: List<Category>,
+    isAr: Boolean
+) {
+    var showAddMainDialog by remember { mutableStateOf(false) }
+    var selectedMainCategoryForSub by remember { mutableStateOf<Category?>(null) }
+
+    // Input States
+    var nameAr by remember { mutableStateOf("") }
+    var nameEn by remember { mutableStateOf("") }
+    var imageUrl by remember { mutableStateOf("") }
+    var sortOrder by remember { mutableStateOf("0") }
+
+    var subNameAr by remember { mutableStateOf("") }
+    var subNameEn by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = "الأقسام الرئيسية المتوفرة", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Button(onClick = { showAddMainDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add categoryicon")
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("قسم جديد")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(categories) { cat ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(text = "${cat.nameAr} (${cat.nameEn})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                IconButton(onClick = { selectedMainCategoryForSub = cat }) {
+                                    Icon(Icons.Default.Add, contentDescription = "Add sub category", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(onClick = { viewModel.deleteCategory(cat.id) }) {
+                                    Icon(Icons.Default.Delete, "Delete", tint = Color.Red)
+                                }
+                            }
+                        }
+                        
+                        // Listing subcategories nested
+                        if (cat.subcategories.isNotEmpty()) {
+                            Text(
+                                text = "الأقسام الفرعية التابعة له:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                            )
+                            Row( // Stable horizontal scroll list
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 10.dp)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                cat.subcategories.forEach { sub ->
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                                shape = RoundedCornerShape(4.dp)
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(text = if (isAr) sub.nameAr else sub.nameEn, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dialog adding Main Category
+        if (showAddMainDialog) {
+            Dialog(onDismissRequest = { showAddMainDialog = false }) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth().padding(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "إضافة قسم رئيسي جديد", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        OutlinedTextField(value = nameAr, onValueChange = { nameAr = it }, label = { Text("الاسم بالعربية") })
+                        OutlinedTextField(value = nameEn, onValueChange = { nameEn = it }, label = { Text("الاسم بالإنجليزية") })
+                        OutlinedTextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("رابط صورة الغلاف") })
+                        OutlinedTextField(value = sortOrder, onValueChange = { sortOrder = it }, label = { Text("الترتيب العددي") })
+                        
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { showAddMainDialog = false }) {
+                                Text("إلغاء")
+                            }
+                            Button(onClick = {
+                                if (nameAr.isBlank() || nameEn.isBlank()) {
+                                    Toast.makeText(context, "الرجاء إدخال الاسمين للمطابقة!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val order = sortOrder.toIntOrNull() ?: 0
+                                    viewModel.addMainCategory(nameAr, nameEn, imageUrl, order)
+                                    nameAr = ""
+                                    nameEn = ""
+                                    imageUrl = ""
+                                    sortOrder = "0"
+                                    showAddMainDialog = false
+                                }
+                            }) {
+                                Text("حفظ القسم")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dialog adding sub category
+        if (selectedMainCategoryForSub != null) {
+            val mainCat = selectedMainCategoryForSub!!
+            Dialog(onDismissRequest = { selectedMainCategoryForSub = null }) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth().padding(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(text = "إضافة قسم فرعي لـ: ${mainCat.nameAr}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        OutlinedTextField(value = subNameAr, onValueChange = { subNameAr = it }, label = { Text("الاسم الفرعي بالعربية") })
+                        OutlinedTextField(value = subNameEn, onValueChange = { subNameEn = it }, label = { Text("الاسم الفرعي بالإنجليزية") })
+                        
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { selectedMainCategoryForSub = null }) {
+                                Text("إلغاء")
+                            }
+                            Button(onClick = {
+                                if (subNameAr.isBlank() || subNameEn.isBlank()) {
+                                    Toast.makeText(context, "املأ جميع الحقول إجبارياً!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.addSubcategory(mainCat.id, subNameAr, subNameEn)
+                                    subNameAr = ""
+                                    subNameEn = ""
+                                    selectedMainCategoryForSub = null
+                                }
+                            }) {
+                                Text("إضافة الفرع")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Sub-Tab 3: Add provider directly by admin (إضافة مقدم خدمة مباشرة بدون شروط)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DirectAddProviderTab(
+    viewModel: DaliliViewModel,
+    categories: List<Category>,
+    isAr: Boolean
+) {
+    val context = LocalContext.current
+
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf<Category?>(null) }
+    var selectedSubcategoryId by remember { mutableStateOf("") }
+    var workAddress by remember { mutableStateOf("") }
+    var district by remember { mutableStateOf("") }
+    var gpsCoordinates by remember { mutableStateOf("") }
+    var personalPhotoUrl by remember { mutableStateOf("") }
+
+    var expandedDropdown by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Text(text = "إضافة مقدم خدمة مباشر (بدون الحاجة لموافقة أو رفع هوامش)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        item {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("الاسم المهني الثلاثي") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = phone,
+                onValueChange = { phone = it },
+                label = { Text("رقم جوال الإتصال وواتس") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        // Category dropdown selector
+        item {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                ExposedDropdownMenuBox(
+                    expanded = expandedDropdown,
+                    onExpandedChange = { expandedDropdown = !expandedDropdown }
+                ) {
+                    OutlinedTextField(
+                        value = if (selectedCategory != null) (if (isAr) selectedCategory!!.nameAr else selectedCategory!!.nameEn) else "",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("اختر القسم والخدمة") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expandedDropdown,
+                        onDismissRequest = { expandedDropdown = false }
+                    ) {
+                        categories.forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(if (isAr) cat.nameAr else cat.nameEn) },
+                                onClick = {
+                                    selectedCategory = cat
+                                    expandedDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            OutlinedTextField(
+                value = workAddress,
+                onValueChange = { workAddress = it },
+                label = { Text("العنوان وتوصيف مكان العمل") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = district,
+                onValueChange = { district = it },
+                label = { Text("المديرية / الدائرة") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = gpsCoordinates,
+                onValueChange = { gpsCoordinates = it },
+                label = { Text("إحداثيات GPS (اختياري)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = personalPhotoUrl,
+                onValueChange = { personalPhotoUrl = it },
+                label = { Text("رابط الصورة الشخصية (اختياري)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Button(
+                onClick = {
+                    if (name.isBlank() || phone.isBlank() || selectedCategory == null || workAddress.isBlank() || district.isBlank()) {
+                        Toast.makeText(context, "الرجاء كتابة جميع الحقول الأساسية قبل الإضافة المباشرة!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.addDirectProvider(
+                            name = name,
+                            phone = phone,
+                            categoryId = selectedCategory!!.id,
+                            subcategoryId = selectedSubcategoryId,
+                            workAddress = workAddress,
+                            district = district,
+                            gpsCoordinates = gpsCoordinates,
+                            personalPhotoUrl = personalPhotoUrl
+                        )
+                        // Reset
+                        name = ""
+                        phone = ""
+                        selectedCategory = null
+                        workAddress = ""
+                        district = ""
+                        gpsCoordinates = ""
+                        personalPhotoUrl = ""
+                        Toast.makeText(context, "تم حفظ مقدم الخدمة ونشره فوراً في الدليل الحقيقي!", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+            ) {
+                Text("إضافة ونشر لمقدم الخدمة مباشرة", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// Sub-Tab 4: Pin & Recommend & Delete approved directory users (تثبيت وترشيح مقدمي الخدمة)
+@Composable
+fun ManageProvidersTab(
+    viewModel: DaliliViewModel,
+    providers: List<Provider>,
+    categories: List<Category>,
+    isAdmin: Boolean,
+    isAr: Boolean
+) {
+    val context = LocalContext.current
+    if (providers.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("لا تملك أي مزودي خدمات مسجلين ونشطين حتى هذه اللحظة.", color = Color.Gray, fontSize = 12.sp)
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(providers) { p ->
+                val catName = categories.find { it.id == p.categoryId }?.let { if (isAr) it.nameAr else it.nameEn } ?: p.categoryId
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1.3f)) {
+                                Text(text = p.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text(text = "جوال: ${p.phone} • القسم: $catName", fontSize = 11.sp, color = Color.Gray)
+                            }
+
+                            // Pin and Recommend Toggles (Enabled only for Admins)
+                            Row(
+                                modifier = Modifier.weight(1.7f),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Recommend ⭐
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clickable {
+                                            if (isAdmin) {
+                                                viewModel.toggleRecommend(p.id)
+                                            } else {
+                                                Toast.makeText(context, "ميزة الترشيح والترقية مخصصة للمدير الرئيسي WAM2026 فقط!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .padding(vertical = 2.dp, horizontal = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = "Recommend star flag",
+                                        tint = if (p.isRecommended) Color(0xFFFFD700) else Color.LightGray,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Text(if (p.isRecommended) "مرشّح" else "ترشيح", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                // Pin 📌
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .clickable {
+                                            if (isAdmin) {
+                                                viewModel.togglePin(p.id)
+                                            } else {
+                                                Toast.makeText(context, "ميزة التثبيت الرأسي مخصصة للمدير الرئيسي WAM2026 فقط!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .padding(vertical = 2.dp, horizontal = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Notifications,
+                                        contentDescription = "Pin category flag",
+                                        tint = if (p.isPinned) Color(0xFF1E88E5) else Color.LightGray,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Text(if (p.isPinned) "مثبّت" else "تثبيت", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Spacer(modifier = Modifier.width(4.dp))
+
+                                // Full delete
+                                IconButton(onClick = { viewModel.deleteProvider(p.id) }) {
+                                    Icon(Icons.Default.Delete, "Delete provider", tint = Color.Red, modifier = Modifier.size(22.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Sub-Tab 5: Create/Delete Supervisors (إدارة المشرفين) - ONLY FOR ADMIN (WAM2026)
+@Composable
+fun SupervisorsAdminTab(
+    viewModel: DaliliViewModel,
+    supervisors: List<Supervisor>,
+    isAr: Boolean
+) {
+    var supUsername by remember { mutableStateOf("") }
+    var supPassword by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(text = "إنشاء حساب مشرف فرعي للتدقيق والمراجعة", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = supUsername,
+                onValueChange = { supUsername = it },
+                label = { Text("المتدرب / المشرف") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = supPassword,
+                onValueChange = { supPassword = it },
+                label = { Text("رمز المرور") },
+                modifier = Modifier.weight(1f),
+                singleLine = true
+            )
+            Button(
+                onClick = {
+                    if (supUsername.isBlank() || supPassword.isBlank()) {
+                        Toast.makeText(context, "الرجاء تعبئة بيانات المشرف كاملة!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.addSupervisor(supUsername, supPassword)
+                        supUsername = ""
+                        supPassword = ""
+                        Toast.makeText(context, "تم حفظ المشرف وبدء حظه في المزامنة الفورية الجارية!", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.height(54.dp)
+            ) {
+                Icon(Icons.Default.Check, contentDescription = "Save sup")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(text = "المشرفون الفرعيون النشطاء حالياً", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (supervisors.isEmpty()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("لا يوجد مشرفين مدخرين في قاعدة البيانات الحالية.", color = Color.Gray, fontSize = 12.sp)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(supervisors) { sup ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(text = "المشرف: ${sup.username}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(text = "كلمة المرور المسجلة: ${sup.password}", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            IconButton(onClick = { viewModel.deleteSupervisor(sup.id) }) {
+                                Icon(Icons.Default.Delete, "Delete sup user", tint = Color.Red)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------
+// SCREEN 7: GLOBAL SECRET SETTINGS SCREEN (البوابة الخلفية)
+// -------------------------------------------------------------
+@Composable
+fun SecretSettingsScreen(
+    viewModel: DaliliViewModel,
+    t: Map<String, String>,
+    isAr: Boolean
+) {
+    val settings by viewModel.appSettings.collectAsState()
+    val context = LocalContext.current
+
+    var appName by remember { mutableStateOf(settings.appName) }
+    var primaryHex by remember { mutableStateOf(settings.primaryColorHex) }
+    var secondaryHex by remember { mutableStateOf(settings.secondaryColorHex) }
+    var welcomeMsg by remember { mutableStateOf(settings.welcomeMessage) }
+    var footerText by remember { mutableStateOf(settings.footerText) }
+    var supportNum by remember { mutableStateOf(settings.supportNumber) }
+    var supportEmail by remember { mutableStateOf(settings.supportEmail) }
+    var adminPass by remember { mutableStateOf(settings.adminPasswordHex) }
+
+    // Synchronize local input state in case setting listener gets remote update
+    LaunchedEffect(settings) {
+        appName = settings.appName
+        primaryHex = settings.primaryColorHex
+        secondaryHex = settings.secondaryColorHex
+        welcomeMsg = settings.welcomeMessage
+        footerText = settings.footerText
+        supportNum = settings.supportNumber
+        supportEmail = settings.supportEmail
+        adminPass = settings.adminPasswordHex
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { viewModel.navigateTo("home") }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Column {
+                    Text(
+                        text = t["secret_settings_title"] ?: "Owner Secret settings",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = if (isAr) "تغيرات وتعديلات فورية تؤثر مباشرة على جميع الأجهزة دون الحاجة لإعادة الكود" else "Live updates sent across all sync nodes instantly",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+        }
+
+        // Form fields for Secret Owner Actions
+        item {
+            OutlinedTextField(
+                value = appName,
+                onValueChange = { appName = it },
+                label = { Text(t["app_name_setting"] ?: "App Name") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = primaryHex,
+                    onValueChange = { primaryHex = it },
+                    label = { Text(t["primary_color"] ?: "Primary (Hex)") },
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = secondaryHex,
+                    onValueChange = { secondaryHex = it },
+                    label = { Text(t["secondary_color"] ?: "Secondary (Hex)") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        item {
+            OutlinedTextField(
+                value = welcomeMsg,
+                onValueChange = { welcomeMsg = it },
+                label = { Text(t["welcome_message"] ?: "Welcome Message") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = footerText,
+                onValueChange = { footerText = it },
+                label = { Text(t["footer_setting"] ?: "Sponsor Footer") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = supportNum,
+                onValueChange = { supportNum = it },
+                label = { Text(t["sup_phone"] ?: "Support Phone") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = supportEmail,
+                onValueChange = { supportEmail = it },
+                label = { Text(t["sup_email"] ?: "Support Email") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
+
+        item {
+            OutlinedTextField(
+                value = adminPass,
+                onValueChange = { adminPass = it },
+                label = { Text(t["admin_pwd"] ?: "Admin Password") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+        }
+
+        item {
+            Button(
+                onClick = {
+                    if (appName.isBlank() || primaryHex.isBlank() || secondaryHex.isBlank() || adminPass.isBlank()) {
+                        Toast.makeText(context, "يرجى تعبئة الحقول الأساسية لضمان سلامة المصادقة المباشرة!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.updateSecretSettings(
+                            appName = appName,
+                            primaryHex = primaryHex,
+                            secondaryHex = secondaryHex,
+                            footerText = footerText,
+                            welcomeMsg = welcomeMsg,
+                            supportNum = supportNum,
+                            supportEmail = supportEmail,
+                            adminPass = adminPass
+                        )
+                        Toast.makeText(context, if (isAr) "تم الحفظ والتزامن الفوري مع الأجهزة!" else "Settings propagated to all clients in real-time!", Toast.LENGTH_SHORT).show()
+                        viewModel.navigateTo("home")
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp)
+            ) {
+                Icon(Icons.Default.Check, contentDescription = "Save settings")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(t["save_all"] ?: "Save and Propagate Changes")
             }
         }
     }
