@@ -1,60 +1,124 @@
 package com.example.data
 
-import androidx.compose.ui.graphics.Color
+import java.io.Serializable
 
 data class Category(
     val id: String = "",
     val nameAr: String = "",
     val nameEn: String = "",
     val imageUrl: String = "",
-    val sortOrder: Int = 0,
-    val subcategories: List<Subcategory> = emptyList()
-)
+    val order: Int = 0
+) : Serializable
 
-data class Subcategory(
-    val id: String = "",
-    val nameAr: String = "",
-    val nameEn: String = ""
-)
-
-data class Provider(
+data class ServiceProvider(
     val id: String = "",
     val name: String = "",
     val phone: String = "",
     val categoryId: String = "",
-    val subcategoryId: String = "",
-    val workAddress: String = "",
-    val district: String = "",
-    val gpsCoordinates: String = "",
-    val personalPhotoUrl: String = "",
-    val idCardPhotoUrl: String = "",
+    val categoryName: String = "",
+    val address: String = "",
+    val region: String = "",
+    val gpsLat: Double = 0.0,
+    val gpsLng: Double = 0.0,
+    val personalPhoto: String = "",
+    val idCard: String = "",
     val isPinned: Boolean = false,
     val isRecommended: Boolean = false,
-    val status: String = "approved", // "pending", "approved", "rejected"
+    val isVerified: Boolean = false,
+    val isBlocked: Boolean = false,
     val rating: Float = 5.0f,
-    val reviewCount: Int = 0,
-    val rejectionReason: String = "",
-    // Subscription / Premium features
+    val ratingCount: Int = 0,
+    val loyaltyPoints: Int = 0,
     val isPremium: Boolean = false,
-    val premiumExpiryTimestamp: Long = 0L
-)
+    val premiumApproved: Boolean = false,
+    val registeredAt: Long = 0L
+) : Serializable
+
+data class PendingProvider(
+    val id: String = "",
+    val name: String = "",
+    val phone: String = "",
+    val categoryId: String = "",
+    val categoryName: String = "",
+    val address: String = "",
+    val region: String = "",
+    val gpsLat: Double = 0.0,
+    val gpsLng: Double = 0.0,
+    val personalPhoto: String = "",
+    val idCard: String = "",
+    val rejectReason: String = "",
+    val submittedAt: Long = 0L
+) : Serializable
 
 data class Review(
     val id: String = "",
     val providerId: String = "",
     val userName: String = "",
-    val rating: Float = 5.0f,
+    val rating: Int = 5,
     val comment: String = "",
-    val timestamp: Long = System.currentTimeMillis()
-)
+    val timestamp: Long = 0L
+) : Serializable
 
-data class Supervisor(
+data class ChatMessage(
     val id: String = "",
-    val username: String = "",
-    val password: String = "",
-    val tfaEnabled: Boolean = false,
-    val tfaSecret: String = ""
-)
+    val providerId: String = "",
+    val userId: String = "",
+    val senderName: String = "",
+    val senderType: String = "guest", // admin, provider, guest, user
+    val message: String = "",
+    val timestamp: Long = 0L
+) : Serializable
+
+data class Banner(
+    val id: String = "",
+    val title: String = "",
+    val type: String = "image", // image, video, text
+    val contentUrl: String = "",
+    val textMessage: String = "",
+    val durationSeconds: Int = 5,
+    val linkUrl: String = "",
+    val isSponsored: Boolean = false,
+    val providerId: String = ""
+) : Serializable
+
+data class AppSettings(
+    val id: String = "global",
+    val appNameAr: String = "دليلي",
+    val appNameEn: String = "Dalili",
+    val primaryColor: String = "#FFD700", // Default gold/emerald/silver/custom
+    val secondaryColor: String = "#1A1A1A",
+    val themeChoice: String = "gold", // silver, gold, emerald, custom
+    val appLogoUrl: String = "",
+    val promoFooterText: String = "MAW 777644670",
+    val welcomeMessage: String = "أهلاً بك في دليلي - بوابتك لجميع الخدمات المحترفة ونظام المزامنة الذكي!",
+    val welcomeMessageEn: String = "Welcome to Dalili - Your gate to all professional services!",
+    val supportPhone: String = "777644670",
+    val supportEmail: String = "support@dalili.com",
+    val supportWhatsapp: String = "https://wa.me/967777644670",
+    
+    // Assistant settings
+    val assistantEnabled: Boolean = true,
+    val assistantAlignLeft: Boolean = false,
+    val assistantSize: String = "medium", // small, medium, large
+    val assistantIcon: String = "🤖",
+    
+    // Notifications toggles
+    val fcmJoinRequests: Boolean = true,
+    val fcmComplaints: Boolean = true,
+    val voiceSearchEnabled: Boolean = true,
+    
+    // Security & Operation Modes
+    val maintenanceMode: Boolean = false,
+    val dataSaverMode: Boolean = false,
+    val supervisor2FAEnabled: Boolean = false,
+    val maxRadiusKm: Int = 50,
+    
+    // Cities/Regions
+    val citiesList: List<String> = listOf("صنعاء", "عدن", "تعز", "حضرموت", "إب", "الحديدة"),
+    
+    // Customization config for headers / icons
+    val topBarLayout: List<String> = listOf("home", "login", "register", "language", "sync")
+) : Serializable
 
 data class Complaint(
     val id: String = "",
@@ -62,79 +126,18 @@ data class Complaint(
     val providerName: String = "",
     val userName: String = "",
     val userPhone: String = "",
-    val reason: String = "",
-    val timestamp: Long = System.currentTimeMillis(),
-    val status: String = "pending" // "pending", "resolved", "dismissed"
-)
+    val text: String = "",
+    val timestamp: Long = 0L
+) : Serializable
 
-data class BannerAd(
-    val id: String = "",
-    val imageUrl: String = "",
-    val targetUrl: String = "",
-    val title: String = "",
-    val durationDays: Int = 7,
-    val sizeType: String = "medium", // "small", "medium", "large"
-    val bannerType: String = "image_alert", // "image_alert", "text_alert"
-    val timestamp: Long = System.currentTimeMillis()
-)
-
-data class LoyaltyAccount(
-    val id: String = "",
-    val userName: String = "",
-    val phone: String = "",
-    val points: Int = 0,
-    val historyLogs: List<String> = emptyList()
-)
-
-data class CityOption(
-    val id: String = "",
-    val nameAr: String = "",
-    val nameEn: String = ""
-)
-
-data class SubscriptionPayment(
+data class ServiceOrder(
     val id: String = "",
     val providerId: String = "",
     val providerName: String = "",
-    val receiptPhotoUrl: String = "",
-    val notes: String = "",
-    val status: String = "pending", // "pending", "approved", "rejected"
-    val timestamp: Long = System.currentTimeMillis()
-)
-
-data class AppSettings(
-    val appName: String = "دليلي - Dalili",
-    val primaryColorHex: String = "#CCCCCC",
-    val secondaryColorHex: String = "#78909C",
-    val welcomeMessage: String = "مرحباً بك في دليلي - دليل الموثوقين الموحد لجميع الخدمات المباشرة!",
-    val footerText: String = "WAM777644670",
-    val supportNumber: String = "777644670",
-    val supportEmail: String = "support@dalili.com",
-    val supportWhatsapp: String = "777644670",
-    val adminPasswordHex: String = "maher736462",
-    // Premium themes configs
-    val themePreset: String = "cosmic_slate", // "cosmic_slate", "charcoal_gold", "royal_emerald", "custom"
-    val backgroundColorHex: String = "#121824",
-    val textColorPreset: String = "bright_white", // "bright_white", "light_gold", "vibrant_silver"
-    val textColorHex: String = "#FFFFFF",
-    // Smart assistant configs
-    val smartAssistantSize: String = "medium", // "small", "medium", "large"
-    val smartAssistantColorHex: String = "#6200EE",
-    val smartAssistantAlignLeft: Boolean = false,
-    val smartAssistantEnabled: Boolean = true,
-    // Extra options
-    val maintenanceMode: Boolean = false,
-    val dataSaverMode: Boolean = false,
-    val maxRadiusDefault: Int = 10,
-    // FCM toggles
-    val fcmJoinRequests: Boolean = true,
-    val fcmComplaints: Boolean = true,
-    // Loyalty Points multiplier configs
-    val pointsPerReview: Int = 10,
-    val pointsPerShare: Int = 20,
-    val scaleFactor: Float = 1.0f,
-    // Premium sub feature
-    val isSubscriptionEnabled: Boolean = true,
-    // Top bar buttons config schema string e.g. "home,login,register,about"
-    val topBarConfig: String = "home,login,register"
-)
+    val providerPhone: String = "",
+    val clientName: String = "",
+    val clientPhone: String = "",
+    val serviceDetails: String = "",
+    val status: String = "completed", // pending, processing, completed
+    val timestamp: Long = 0L
+) : Serializable

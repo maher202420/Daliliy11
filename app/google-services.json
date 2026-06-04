@@ -1,21 +1,26 @@
 {
   "project_info": {
-    "project_number": "123456789",
-    "project_id": "dummy-project-id",
-    "storage_bucket": "dummy-project-id.appspot.com"
+    "project_number": "123456789012",
+    "project_id": "dalili-app-2026",
+    "storage_bucket": "dalili-app-2026.appspot.com"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:123456789:android:123456789",
+        "mobilesdk_app_id": "1:123456789012:android:abcdef1234567890",
         "android_client_info": {
-          "package_name": "com.example.dalili"
+          "package_name": "com.example"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "123456789012-abcdefghijklmnopqrstuvwxyz.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "dummy-key"
+          "current_key": "AIzaSyDummyKeyForDaliliAppCompilation2026"
         }
       ],
       "services": {
