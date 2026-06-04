@@ -2,142 +2,137 @@ package com.example.data
 
 import java.io.Serializable
 
-data class Category(
-    val id: String = "",
-    val nameAr: String = "",
-    val nameEn: String = "",
-    val imageUrl: String = "",
-    val order: Int = 0
-) : Serializable
-
-data class ServiceProvider(
-    val id: String = "",
-    val name: String = "",
-    val phone: String = "",
-    val categoryId: String = "",
-    val categoryName: String = "",
-    val address: String = "",
-    val region: String = "",
-    val gpsLat: Double = 0.0,
-    val gpsLng: Double = 0.0,
-    val personalPhoto: String = "",
-    val idCard: String = "",
-    val isPinned: Boolean = false,
-    val isRecommended: Boolean = false,
-    val isVerified: Boolean = false,
-    val isBlocked: Boolean = false,
-    val rating: Float = 5.0f,
-    val ratingCount: Int = 0,
-    val loyaltyPoints: Int = 0,
-    val isPremium: Boolean = false,
-    val premiumApproved: Boolean = false,
-    val registeredAt: Long = 0L
-) : Serializable
-
-data class PendingProvider(
-    val id: String = "",
-    val name: String = "",
-    val phone: String = "",
-    val categoryId: String = "",
-    val categoryName: String = "",
-    val address: String = "",
-    val region: String = "",
-    val gpsLat: Double = 0.0,
-    val gpsLng: Double = 0.0,
-    val personalPhoto: String = "",
-    val idCard: String = "",
-    val rejectReason: String = "",
-    val submittedAt: Long = 0L
-) : Serializable
-
-data class Review(
-    val id: String = "",
-    val providerId: String = "",
-    val userName: String = "",
-    val rating: Int = 5,
-    val comment: String = "",
-    val timestamp: Long = 0L
-) : Serializable
-
-data class ChatMessage(
-    val id: String = "",
-    val providerId: String = "",
-    val userId: String = "",
-    val senderName: String = "",
-    val senderType: String = "guest", // admin, provider, guest, user
-    val message: String = "",
-    val timestamp: Long = 0L
-) : Serializable
-
-data class Banner(
-    val id: String = "",
-    val title: String = "",
-    val type: String = "image", // image, video, text
-    val contentUrl: String = "",
-    val textMessage: String = "",
-    val durationSeconds: Int = 5,
-    val linkUrl: String = "",
-    val isSponsored: Boolean = false,
-    val providerId: String = ""
-) : Serializable
-
+// AppSettings contains editable configurations
 data class AppSettings(
-    val id: String = "global",
-    val appNameAr: String = "دليلي",
-    val appNameEn: String = "Dalili",
-    val primaryColor: String = "#FFD700", // Default gold/emerald/silver/custom
-    val secondaryColor: String = "#1A1A1A",
-    val themeChoice: String = "gold", // silver, gold, emerald, custom
-    val appLogoUrl: String = "",
-    val promoFooterText: String = "MAW 777644670",
-    val welcomeMessage: String = "أهلاً بك في دليلي - بوابتك لجميع الخدمات المحترفة ونظام المزامنة الذكي!",
-    val welcomeMessageEn: String = "Welcome to Dalili - Your gate to all professional services!",
-    val supportPhone: String = "777644670",
-    val supportEmail: String = "support@dalili.com",
-    val supportWhatsapp: String = "https://wa.me/967777644670",
-    
-    // Assistant settings
-    val assistantEnabled: Boolean = true,
-    val assistantAlignLeft: Boolean = false,
-    val assistantSize: String = "medium", // small, medium, large
-    val assistantIcon: String = "🤖",
-    
-    // Notifications toggles
-    val fcmJoinRequests: Boolean = true,
-    val fcmComplaints: Boolean = true,
-    val voiceSearchEnabled: Boolean = true,
-    
-    // Security & Operation Modes
-    val maintenanceMode: Boolean = false,
-    val dataSaverMode: Boolean = false,
-    val supervisor2FAEnabled: Boolean = false,
-    val maxRadiusKm: Int = 50,
-    
-    // Cities/Regions
-    val citiesList: List<String> = listOf("صنعاء", "عدن", "تعز", "حضرموت", "إب", "الحديدة"),
-    
-    // Customization config for headers / icons
-    val topBarLayout: List<String> = listOf("home", "login", "register", "language", "sync")
+    var appNameAr: String = "دليلي",
+    var appNameEn: String = "Dalili",
+    var promoFooterText: String = "MAW 777644670",
+    var supportPhone: String = "777644670",
+    var supportEmail: String = "support@dalili.com",
+    var supportWhatsapp: String = "777644670",
+    var primaryColor: String = "#1A237E", // Royal Indigo Blue
+    var secondaryColor: String = "#FFD700", // Gold Accent
+    var themeChoice: String = "dark", // dark, light, cosmic
+    var assistantEnabled: Boolean = true,
+    var assistantIconUrl: String = "", // empty means default robotic emoji
+    var assistantSize: String = "medium", // small, medium, large
+    var maxRadiusDefault: Float = 30f,
+    var isMaintenanceMode: Boolean = false,
+    var maintenanceMessage: String = "التطبيق في وضع الصيانة حالياً لخدمتكم بشكل أفضل.",
+    var layoutFormat: String = "standard"
 ) : Serializable
 
+// ServiceProvider represents professionals on our main list
+data class ServiceProvider(
+    var id: String = "",
+    var name: String = "",
+    var phone: String = "",
+    var categoryId: String = "",
+    var categoryName: String = "",
+    var subCategoryId: String = "",
+    var subCategoryName: String = "",
+    var region: String = "",
+    var address: String = "",
+    var personalPhoto: String = "",
+    var identityPhoto: String = "",
+    var isVerified: Boolean = false,
+    var isPinned: Boolean = false, // Shows at first of categories
+    var isRecommended: Boolean = false, // Shows in top section
+    var isPremium: Boolean = false, // Has monthly subscription
+    var isBlocked: Boolean = false,
+    var rating: Float = 5.0f,
+    var ratingCount: Int = 1,
+    var latitude: Double = 15.3694, //Default Sana'a
+    var longitude: Double = 44.1910,
+    var subscriptionExpiry: Long = 0L, // Expiry timestamp
+    var subscriptionStatus: String = "none" // none, pending_approval, active
+) : Serializable
+
+// Category representation
+data class Category(
+    var id: String = "",
+    var nameAr: String = "",
+    var nameEn: String = "",
+    var imageUrl: String = "",
+    var displayOrder: Int = 0
+) : Serializable
+
+// SubCategory representation
+data class SubCategory(
+    var id: String = "",
+    var categoryId: String = "",
+    var nameAr: String = "",
+    var nameEn: String = ""
+) : Serializable
+
+// Banners for top main sliders
+data class Banner(
+    var id: String = "",
+    var textMessage: String = "",
+    var type: String = "text", // text, image, video
+    var contentUrl: String = "",
+    var redirectionUrl: String = "",
+    var durationSeconds: Int = 5,
+    var isSponsored: Boolean = false,
+    var sizeChoice: String = "medium", // small, medium, large
+    var expiryTimestamp: Long = 0L
+) : Serializable
+
+// Complaints/Reports sent on provider profiles
 data class Complaint(
-    val id: String = "",
-    val providerId: String = "",
-    val providerName: String = "",
-    val userName: String = "",
-    val userPhone: String = "",
-    val text: String = "",
-    val timestamp: Long = 0L
+    var id: String = "",
+    var providerId: String = "",
+    var providerName: String = "",
+    var reporterName: String = "زائر",
+    var reporterPhone: String = "",
+    var reasonText: String = "",
+    var timestamp: Long = System.currentTimeMillis()
 ) : Serializable
 
+// Real-time Chat message
+data class ChatMessage(
+    var id: String = "",
+    var senderId: String = "",
+    var senderName: String = "",
+    var receiverId: String = "", // empty means broadcast or Admin chat
+    var receiverName: String = "",
+    var text: String = "",
+    var timestamp: Long = System.currentTimeMillis()
+) : Serializable
+
+// Device whitelist for secure admin gate
+data class WhitelistedDevice(
+    var deviceId: String = "",
+    var deviceLabel: String = "",
+    var authorizedBy: String = "",
+    var isAllowed: Boolean = true
+) : Serializable
+
+// Admin / Supervisor accounts
+data class AdminUser(
+    var id: String = "",
+    var username: String = "",
+    var password: String = "",
+    var role: String = "admin" // admin, manager, owner
+) : Serializable
+
+// Activity activityLogs/notifs for real-time manager updates
+data class ActivityLog(
+    var id: String = "",
+    var title: String = "",
+    var description: String = "",
+    var category: String = "security", // security, subscription, reports, registration
+    var timestamp: Long = System.currentTimeMillis(),
+    var isRead: Boolean = false
+) : Serializable
+
+// Service order tracking (for user dashboard)
 data class ServiceOrder(
-    val id: String = "",
-    val providerId: String = "",
-    val providerName: String = "",
-    val providerPhone: String = "",
-    val clientName: String = "",
-    val clientPhone: String = "",
-    val serviceDetails: String = "",
-    val status: String = "completed", // pending, processing, completed
-    val timestamp: Long = 0L
+    var id: String = "",
+    var userId: String = "",
+    var providerId: String = "",
+    var providerName: String = "",
+    var categoryName: String = "",
+    var orderDate: Long = System.currentTimeMillis(),
+    var status: String = "completed" // pending, completed
 ) : Serializable

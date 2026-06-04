@@ -1,57 +1,44 @@
 package com.example.ui
 
+import android.app.Application
 import android.content.Context
+import android.os.Environment
 import android.util.Log
-import androidx.lifecycle.ViewModel
+import android.widget.Toast
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.*
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.firestoreSettings
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
-import java.io.FileWriter
+import java.io.FileOutputStream
 
-class DaliliViewModel : ViewModel() {
+class DaliliViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val db: FirebaseFirestore? by lazy {
-        try {
-            val firestore = FirebaseFirestore.getInstance()
-            val settings = firestoreSettings {
-                isPersistenceEnabled = true
-            }
-            firestore.firestoreSettings = settings
-            firestore
-        } catch (e: Exception) {
-            Log.e("Firebase", "Firestore init error, offline backup activated: ${e.message}")
-            null
-        }
-    }
+    private val context = application.applicationContext
+    private var db: FirebaseFirestore? = null
 
-    // Listener reference tracking for cleaning up
-    private val registrations = mutableListOf<ListenerRegistration>()
-
-    // Core States
+    // State flows representing the models
     private val _settings = MutableStateFlow(AppSettings())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     private val _categories = MutableStateFlow<List<Category>>(emptyList())
     val categories: StateFlow<List<Category>> = _categories.asStateFlow()
 
+    private val _subCategories = MutableStateFlow<List<SubCategory>>(emptyList())
+    val subCategories: StateFlow<List<SubCategory>> = _subCategories.asStateFlow()
+
     private val _providers = MutableStateFlow<List<ServiceProvider>>(emptyList())
     val providers: StateFlow<List<ServiceProvider>> = _providers.asStateFlow()
 
-    private val _pendingProviders = MutableStateFlow<List<PendingProvider>>(emptyList())
-    val pendingProviders: StateFlow<List<PendingProvider>> = _pendingProviders.asStateFlow()
-
-    private val _reviews = MutableStateFlow<List<Review>>(emptyList())
-    val reviews: StateFlow<List<Review>> = _reviews.asStateFlow()
-
-    private val _chats = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val chats: StateFlow<List<ChatMessage>> = _chats.asStateFlow()
+    private val _pendingProviders = MutableStateFlow<List<ServiceProvider>>(emptyList())
+    val pendingProviders: StateFlow<List<ServiceProvider>> = _pendingProviders.asStateFlow()
 
     private val _banners = MutableStateFlow<List<Banner>>(emptyList())
     val banners: StateFlow<List<Banner>> = _banners.asStateFlow()
@@ -59,700 +46,913 @@ class DaliliViewModel : ViewModel() {
     private val _complaints = MutableStateFlow<List<Complaint>>(emptyList())
     val complaints: StateFlow<List<Complaint>> = _complaints.asStateFlow()
 
+    private val _chats = MutableStateFlow<List<ChatMessage>>(emptyList())
+    val chats: StateFlow<List<ChatMessage>> = _chats.asStateFlow()
+
+    private val _whitelistedDevices = MutableStateFlow<List<WhitelistedDevice>>(emptyList())
+    val whitelistedDevices: StateFlow<List<WhitelistedDevice>> = _whitelistedDevices.asStateFlow()
+
+    private val _admins = MutableStateFlow<List<AdminUser>>(emptyList())
+    val admins: StateFlow<List<AdminUser>> = _admins.asStateFlow()
+
+    private val _activityLogs = MutableStateFlow<List<ActivityLog>>(emptyList())
+    val activityLogs: StateFlow<List<ActivityLog>> = _activityLogs.asStateFlow()
+
     private val _serviceOrders = MutableStateFlow<List<ServiceOrder>>(emptyList())
     val serviceOrders: StateFlow<List<ServiceOrder>> = _serviceOrders.asStateFlow()
 
-    // Offline seeding backup list
-    private var isUsingOfflineMock = false
+    // Firestore listener registrations for real-time synchronization
+    private val listeners = mutableListOf<ListenerRegistration>()
 
     init {
-        setupSnapshotListeners()
-    }
-
-    private fun setupSnapshotListeners() {
-        val firestore = db
-        if (firestore == null) {
-            activateBackupStaticData()
-            return
-        }
-
         try {
-            // 1. Settings Listener
-            val settingsRef = firestore.collection("settings").document("global")
-            val lSettings = settingsRef.addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    Log.e("Firebase", "Settings error: ${error.message}")
-                    return@addSnapshotListener
-                }
-                if (snapshot != null && snapshot.exists()) {
-                    val rawObj = snapshot.toObject(AppSettings::class.java)
-                    if (rawObj != null) {
-                        _settings.value = rawObj
-                    }
-                } else {
-                    // Seed initial setting document
-                    saveSettings(AppSettings())
-                }
-            }
-            registrations.add(lSettings)
-
-            // 2. Categories Listener
-            val lCategories = firestore.collection("categories")
-                .orderBy("order")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        val list = snapshots.toObjects(Category::class.java)
-                        _categories.value = list
-                        if (list.isEmpty()) {
-                            seedDefaultCategories()
-                        }
-                    }
-                }
-            registrations.add(lCategories)
-
-            // 3. Service Providers Listener
-            val lProviders = firestore.collection("service_providers")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        val list = snapshots.toObjects(ServiceProvider::class.java)
-                        _providers.value = list
-                        if (list.isEmpty()) {
-                            seedDefaultProviders()
-                        }
-                    }
-                }
-            registrations.add(lProviders)
-
-            // 4. Pending Providers Listener
-            val lPending = firestore.collection("pending_providers")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        _pendingProviders.value = snapshots.toObjects(PendingProvider::class.java)
-                    }
-                }
-            registrations.add(lPending)
-
-            // 5. Reviews Listener
-            val lReviews = firestore.collection("reviews")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        _reviews.value = snapshots.toObjects(Review::class.java)
-                    }
-                }
-            registrations.add(lReviews)
-
-            // 6. Chats Listener
-            val lChats = firestore.collection("chats")
-                .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.ASCENDING)
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        _chats.value = snapshots.toObjects(ChatMessage::class.java)
-                    }
-                }
-            registrations.add(lChats)
-
-            // 7. Banners Listener
-            val lBanners = firestore.collection("banners")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        _banners.value = snapshots.toObjects(Banner::class.java)
-                        if (snapshots.isEmpty) {
-                            seedDefaultBanners()
-                        }
-                    }
-                }
-            registrations.add(lBanners)
-
-            // 8. Complaints Listener
-            val lComplaints = firestore.collection("complaints")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        _complaints.value = snapshots.toObjects(Complaint::class.java)
-                    }
-                }
-            registrations.add(lComplaints)
-
-            // 9. Service Orders List Listener
-            val lOrders = firestore.collection("service_orders")
-                .addSnapshotListener { snapshots, error ->
-                    if (snapshots != null) {
-                        _serviceOrders.value = snapshots.toObjects(ServiceOrder::class.java)
-                    }
-                }
-            registrations.add(lOrders)
-
+            db = FirebaseFirestore.getInstance()
+            setupRealtimeSync()
         } catch (e: Exception) {
-            Log.e("Firebase", "Error subscribing to SnapshotListeners: ${e.message}")
-            activateBackupStaticData()
+            Log.e("DaliliViewModel", "Firebase uninitialized or failed. Initializing memory cache fallback.", e)
+            loadOfflineFallbackData()
         }
     }
 
-    private fun activateBackupStaticData() {
-        isUsingOfflineMock = true
-        _settings.value = AppSettings()
-        
-        // Mock Categories
-        _categories.value = listOf(
-            Category("c1", "كهربائي محترف", "Professional Electrician", "https://picsum.photos/300/200?random=1", 1),
-            Category("c2", "سباك وصيانة صحية", "Plumber & Sanitary Specialist", "https://picsum.photos/300/200?random=2", 2),
-            Category("c3", "صيانة أنظمة تكييف", "HVAC Maintenance Specialist", "https://picsum.photos/300/200?random=3", 3),
-            Category("c4", "نجارة وهندسة ديكور", "Carpentry & Decor Craft", "https://picsum.photos/300/200?random=4", 4),
-            Category("c5", "صيانة أجهزة وهواتف", "Mobiles & Tech Care", "https://picsum.photos/300/200?random=5", 5),
-            Category("c6", "تعليم وتدريس خصوصي", "Tutoring & Education Helper", "https://picsum.photos/300/200?random=6", 6)
+    private fun setupRealtimeSync() {
+        val firestore = db ?: return
+
+        // 1. AppSettings Listener
+        listeners.add(
+            firestore.collection("settings").document("global_config")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null && snapshot.exists()) {
+                        snapshot.toObject(AppSettings::class.java)?.let {
+                            _settings.value = it
+                        }
+                    } else {
+                        // Seed default settings to Firestore
+                        firestore.collection("settings").document("global_config").set(AppSettings())
+                    }
+                }
         )
 
-        // Mock Providers
-        _providers.value = listOf(
+        // 2. Categories Listener
+        listeners.add(
+            firestore.collection("categories").orderBy("displayOrder")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        val list = snapshot.toObjects(Category::class.java)
+                        _categories.value = list
+                        if (list.isEmpty()) seedDefaultCategories()
+                    }
+                }
+        )
+
+        // 3. SubCategories Listener
+        listeners.add(
+            firestore.collection("subcategories")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _subCategories.value = snapshot.toObjects(SubCategory::class.java)
+                    }
+                }
+        )
+
+        // 4. Service Providers Listener
+        listeners.add(
+            firestore.collection("service_providers")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _providers.value = snapshot.toObjects(ServiceProvider::class.java)
+                    }
+                }
+        )
+
+        // 5. Pending Providers Listener
+        listeners.add(
+            firestore.collection("pending_providers")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _pendingProviders.value = snapshot.toObjects(ServiceProvider::class.java)
+                    }
+                }
+        )
+
+        // 6. Banners Listener
+        listeners.add(
+            firestore.collection("banners").orderBy("expiryTimestamp")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _banners.value = snapshot.toObjects(Banner::class.java)
+                    }
+                }
+        )
+
+        // 7. Complaints Listener
+        listeners.add(
+            firestore.collection("complaints").orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _complaints.value = snapshot.toObjects(Complaint::class.java)
+                    }
+                }
+        )
+
+        // 8. Chats Listener
+        listeners.add(
+            firestore.collection("chats").orderBy("timestamp")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _chats.value = snapshot.toObjects(ChatMessage::class.java)
+                    }
+                }
+        )
+
+        // 9. Whitelist Listener
+        listeners.add(
+            firestore.collection("whitelisted_devices")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _whitelistedDevices.value = snapshot.toObjects(WhitelistedDevice::class.java)
+                    }
+                }
+        )
+
+        // 10. Admin User Accounts Listener
+        listeners.add(
+            firestore.collection("admins")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        val list = snapshot.toObjects(AdminUser::class.java)
+                        _admins.value = list
+                        if (list.isEmpty()) seedDefaultAdmins()
+                    }
+                }
+        )
+
+        // 11. Activity Notification activityLogs
+        listeners.add(
+            firestore.collection("activity_logs").orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _activityLogs.value = snapshot.toObjects(ActivityLog::class.java)
+                    }
+                }
+        )
+
+        // 12. Service orders tracking (previous requests history)
+        listeners.add(
+            firestore.collection("service_orders")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _serviceOrders.value = snapshot.toObjects(ServiceOrder::class.java)
+                    }
+                }
+        )
+    }
+
+    private fun loadOfflineFallbackData() {
+        _settings.value = AppSettings()
+        
+        val seedCats = listOf(
+            Category("cat1", "تكنولوجيا وصيانة", "Tech & Support", "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=120dp", 1),
+            Category("cat2", "نجارة وديكور", "Carpentry & Decor", "https://images.unsplash.com/photo-1533090161767-e6ffed986c88?w=120dp", 2),
+            Category("cat3", "كهرباء وسباكة", "Electric & Plumbing", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=120dp", 3),
+            Category("cat4", "أعمال البناء والمقاولات", "Builder & Mason", "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=120dp", 4)
+        )
+        _categories.value = seedCats
+
+        _subCategories.value = listOf(
+            SubCategory("sub1", "cat1", "صيانة الهواتف الذكية", "Mobile Phone Repair"),
+            SubCategory("sub2", "cat1", "برمجة ويب وتطبيقات", "App & Web Coding"),
+            SubCategory("sub3", "cat2", "تركيب غرف وأخشاب", "Bedroom Crafting"),
+            SubCategory("sub4", "cat2", "تصاميم جبس وديكور", "Decor & Gypsum"),
+            SubCategory("sub5", "cat3", "سباكة منزلية متكاملة", "Plumbing Repairs"),
+            SubCategory("sub6", "cat3", "تأسيس تمديدات الكهرباء", "Home Wiring")
+        )
+
+        _providers.value = mutableListOf(
             ServiceProvider(
                 id = "p1",
-                name = "ماهر محمد طاهر",
+                name = "المهندس ماهر البدري",
                 phone = "777644670",
-                categoryId = "c1",
-                categoryName = "كهربائي محترف",
-                address = "شارع حده، أمام برج كنعان",
+                categoryId = "cat1",
+                categoryName = "تكنولوجيا وصيانة",
+                subCategoryId = "sub2",
+                subCategoryName = "برمجة ويب وتطبيقات",
                 region = "صنعاء",
-                gpsLat = 15.3188,
-                gpsLng = 44.2012,
-                personalPhoto = "https://picsum.photos/150/150?random=11",
+                address = "شارع حدة - أمام مركز الكمبيوتر",
+                personalPhoto = "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100",
+                isVerified = true,
                 isPinned = true,
                 isRecommended = true,
-                isVerified = true,
-                rating = 4.9f,
-                ratingCount = 12,
-                loyaltyPoints = 250,
                 isPremium = true
             ),
             ServiceProvider(
                 id = "p2",
-                name = "فارس أحمد الجبري",
-                phone = "771122334",
-                categoryId = "c2",
-                categoryName = "سباك وصيانة صحية",
-                address = "شارع المعلا الرئيسي",
+                name = "المعلم محمد اليماني",
+                phone = "736462700",
+                categoryId = "cat2",
+                categoryName = "نجارة وديكور",
+                subCategoryId = "sub3",
+                subCategoryName = "تركيب غرف وأخشاب",
                 region = "عدن",
-                gpsLat = 12.7855,
-                gpsLng = 44.9752,
-                personalPhoto = "https://picsum.photos/150/150?random=12",
+                address = "المنصورة - خلف جولة كالتكس",
+                personalPhoto = "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100",
+                isVerified = true,
                 isPinned = false,
                 isRecommended = true,
-                isVerified = false,
-                rating = 4.5f,
-                ratingCount = 8,
-                loyaltyPoints = 90,
                 isPremium = false
-            ),
-            ServiceProvider(
-                id = "p3",
-                name = "عبدالرحمن الشميري",
-                phone = "733889922",
-                categoryId = "c1",
-                categoryName = "كهربائي محترف",
-                address = "شارع جمال، جوار البريد المالي",
-                region = "تعز",
-                gpsLat = 13.5786,
-                gpsLng = 44.0135,
-                personalPhoto = "https://picsum.photos/150/150?random=13",
-                isPinned = true,
-                isRecommended = false,
-                isVerified = true,
-                rating = 4.8f,
-                ratingCount = 15,
-                loyaltyPoints = 310,
-                isPremium = true
-            ),
-            ServiceProvider(
-                id = "p4",
-                name = "مأمون نجيب غانم",
-                phone = "775443322",
-                categoryId = "c5",
-                categoryName = "صيانة أجهزة وهواتف",
-                address = "جوار جامعة العلوم والتكنولوجيا",
-                region = "صنعاء",
-                gpsLat = 15.3523,
-                gpsLng = 44.1725,
-                personalPhoto = "https://picsum.photos/150/150?random=14",
-                isPinned = false,
-                isRecommended = false,
-                isVerified = false,
-                rating = 4.2f,
-                ratingCount = 5,
-                loyaltyPoints = 40,
-                isPremium = false
-            )
-        )
-
-        _pendingProviders.value = listOf(
-            PendingProvider(
-                id = "p_pending1",
-                name = "علي مصلح القاضي",
-                phone = "773445566",
-                categoryId = "c4",
-                categoryName = "نجارة وهندسة ديكور",
-                address = "شارع الستين الشرقي",
-                region = "صنعاء",
-                personalPhoto = "https://picsum.photos/100/100?random=20",
-                submittedAt = System.currentTimeMillis()
             )
         )
 
         _banners.value = listOf(
-            Banner("b1", "خصومات المهنيين المعتمدين!", "text", "", "احصل على أفضل الخدمات المضمونة اليوم بنسبة خصم تصل لـ 20% بضمان أسبوع كامل!", 6, "", isSponsored = false),
-            Banner("b2", "مقدم الخدمة المتميز الأسبوعي", "image", "https://picsum.photos/600/250?random=30", "ماهر محمد طاهر - أخصائي تمديدات منزلية وصناعية معتمدة بقيمة اقتصادية ومصداقية كاملة.", 8, "777644670", isSponsored = true, "p1")
-        )
-
-        _chats.value = listOf(
-            ChatMessage("msg1", "p1", "visitor123", "زائر 123", "guest", "مرحباً، هل تقدمون خدمات الصيانة في منطقة الروضة؟", System.currentTimeMillis() - 120000),
-            ChatMessage("msg2", "p1", "visitor123", "ماهر محمد طاهر", "provider", "نعم أهلاً بك، أصل لأي مكان بصنعاء، متى تريد الفحص؟", System.currentTimeMillis() - 60000)
-        )
-    }
-
-    // Seeding logic for Firebase collections when starting empty
-    private fun seedDefaultCategories() {
-        val firestore = db ?: return
-        val list = listOf(
-            Category("c1", "كهربائي محترف", "Professional Electrician", "https://picsum.photos/300/200?random=1", 1),
-            Category("c2", "سباك وصيانة صحية", "Plumber & Sanitary Specialist", "https://picsum.photos/300/200?random=2", 2),
-            Category("c3", "صيانة أنظمة تكييف", "HVAC Maintenance Specialist", "https://picsum.photos/300/200?random=3", 3),
-            Category("c4", "نجارة وهندسة ديكور", "Carpentry & Decor Craft", "https://picsum.photos/300/200?random=4", 4),
-            Category("c5", "صيانة أجهزة وهواتف", "Mobiles & Tech Care", "https://picsum.photos/300/200?random=5", 5),
-            Category("c6", "تعليم وتدريس خصوصي", "Tutoring & Education Helper", "https://picsum.photos/300/200?random=6", 6)
-        )
-        for (item in list) {
-            firestore.collection("categories").document(item.id).set(item)
-        }
-    }
-
-    private fun seedDefaultProviders() {
-        val firestore = db ?: return
-        val list = listOf(
-            ServiceProvider(
-                id = "p1",
-                name = "ماهر محمد طاهر",
-                phone = "777644670",
-                categoryId = "c1",
-                categoryName = "كهربائي محترف",
-                address = "شارع حده، أمام برج كنعان",
-                region = "صنعاء",
-                gpsLat = 15.3188,
-                gpsLng = 44.2012,
-                personalPhoto = "https://picsum.photos/150/150?random=11",
-                isPinned = true,
-                isRecommended = true,
-                isVerified = true,
-                rating = 4.9f,
-                ratingCount = 12,
-                loyaltyPoints = 250,
-                isPremium = true,
-                premiumApproved = true,
-                registeredAt = System.currentTimeMillis()
+            Banner(
+                id = "b1",
+                textMessage = "خصم 40% على خدمات الصيانة المنزلية والبرمجة هذا الأسبوع!",
+                type = "text",
+                isSponsored = true,
+                sizeChoice = "medium",
+                expiryTimestamp = System.currentTimeMillis() + 864000000L
             )
         )
-        for (item in list) {
-            firestore.collection("service_providers").document(item.id).set(item)
-        }
+
+        _admins.value = listOf(
+            AdminUser("adm1", "WAM2026", "maher736462", "owner")
+        )
     }
 
-    private fun seedDefaultBanners() {
+    // Seeding logic for firestore when empty
+    private fun seedDefaultCategories() {
         val firestore = db ?: return
-        val list = listOf(
-            Banner("b1", "خصومات المهنيين المعتمدين!", "text", "", "احصل على أفضل الخدمات المضمونة اليوم بنسبة خصم تصل لـ 20% بضمان أسبوع كامل!", 6, "", isSponsored = false),
-            Banner("b2", "مقدم الخدمة المتميز الأسبوعي", "image", "https://picsum.photos/600/250?random=30", "ماهر محمد طاهر - أخصائي تمديدات منزلية وصناعية معتمدة بقيمة اقتصادية ومصداقية كاملة.", 8, "777644670", isSponsored = true, "p1")
+        val items = listOf(
+            Category("cat1", "تكنولوجيا وصيانة", "Tech & Support", "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=150", 1),
+            Category("cat2", "نجارة وديكور", "Carpentry & Decor", "https://images.unsplash.com/photo-1533090161767-e6ffed986c88?w=150", 2),
+            Category("cat3", "كهرباء وسباكة", "Electric & Plumbing", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=150", 3),
+            Category("cat4", "أعمال البناء والمقاولات", "Builder & Mason", "https://images.unsplash.com/photo-1541888946425-d81bb19240f5?w=150", 4)
         )
-        for (item in list) {
-            firestore.collection("banners").document(item.id).set(item)
+        for (item in items) {
+            firestore.collection("categories").document(item.id).set(item)
+        }
+
+        val subs = listOf(
+            SubCategory("sub1", "cat1", "صيانة الهواتف الذكية", "Mobile Phone Repair"),
+            SubCategory("sub2", "cat1", "برمجة ويب وتطبيقات", "App & Web Coding"),
+            SubCategory("sub3", "cat2", "تركيب غرف وأخشاب", "Bedroom Crafting"),
+            SubCategory("sub4", "cat2", "تصاميم جبس وديكور", "Decor & Gypsum"),
+            SubCategory("sub5", "cat3", "سباكة منزلية متكاملة", "Plumbing Repairs"),
+            SubCategory("sub6", "cat3", "تأسيس تمديدات الكهرباء", "Home Wiring")
+        )
+        for (sub in subs) {
+            firestore.collection("subcategories").document(sub.id).set(sub)
         }
     }
 
-    // Settings actions (Backdoor and general Admin access)
-    fun saveSettings(newSettings: AppSettings) {
-        _settings.value = newSettings
-        db?.collection("settings")?.document("global")?.set(newSettings)
+    private fun seedDefaultAdmins() {
+        val firestore = db ?: return
+        val superAdmin = AdminUser("adm1", "WAM2026", "maher736462", "owner")
+        firestore.collection("admins").document(superAdmin.id).set(superAdmin)
     }
 
-    // Submit a provider for review
-    fun submitPendingProvider(
-        name: String,
-        phone: String,
-        categoryId: String,
-        categoryName: String,
-        address: String,
-        region: String,
-        gpsLat: Double,
-        gpsLng: Double,
-        personalPhoto: String,
-        idCard: String,
-        onComplete: (Boolean) -> Unit
-    ) {
-        val newId = "pending_${System.currentTimeMillis()}"
-        val obj = PendingProvider(
-            id = newId,
-            name = name,
-            phone = phone,
-            categoryId = categoryId,
-            categoryName = categoryName,
-            address = address,
-            region = region,
-            gpsLat = gpsLat,
-            gpsLng = gpsLng,
-            personalPhoto = personalPhoto.ifEmpty { "https://picsum.photos/150/150?random=${System.currentTimeMillis() % 100}" },
-            idCard = idCard,
-            submittedAt = System.currentTimeMillis()
-        )
+    // --- VIEWMODEL CONTROL API ACTIONS ---
 
-        if (isUsingOfflineMock) {
-            _pendingProviders.value = _pendingProviders.value + obj
+    fun updateSettings(newSettings: AppSettings, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("settings").document("global_config").set(newSettings)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            _settings.value = newSettings
             onComplete(true)
-            return
         }
-
-        db?.collection("pending_providers")?.document(newId)?.set(obj)
-            ?.addOnCompleteListener { task ->
-                onComplete(task.isSuccessful)
-            } ?: run {
-                _pendingProviders.value = _pendingProviders.value + obj
-                onComplete(true)
-            }
     }
 
-    // Approve Provider -> move to service_providers
-    fun approveProvider(pending: PendingProvider, onComplete: (Boolean) -> Unit) {
-        val approved = ServiceProvider(
-            id = "prov_${System.currentTimeMillis()}",
-            name = pending.name,
-            phone = pending.phone,
-            categoryId = pending.categoryId,
-            categoryName = pending.categoryName,
-            address = pending.address,
-            region = pending.region,
-            gpsLat = pending.gpsLat,
-            gpsLng = pending.gpsLng,
-            personalPhoto = pending.personalPhoto,
-            idCard = pending.idCard,
-            registeredAt = System.currentTimeMillis()
+    fun submitRegistrationForm(provider: ServiceProvider, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val freshId = if (provider.id.isEmpty()) "prov_" + System.currentTimeMillis() else provider.id
+        provider.id = freshId
+        provider.subscriptionStatus = "none"
+
+        // Log notification to activity logs
+        val alert = ActivityLog(
+            id = "log_" + System.currentTimeMillis(),
+            title = "طلب تسجيل جديد",
+            description = "قام المهني ${provider.name} بتقديم طلب للانضمام للأقسام.",
+            category = "registration"
         )
 
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value + approved
-            _pendingProviders.value = _pendingProviders.value.filter { it.id != pending.id }
-            onComplete(true)
-            return
-        }
-
-        val firestore = db ?: run {
-            onComplete(false)
-            return
-        }
-        firestore.runTransaction { transaction ->
-            val pendingRef = firestore.collection("pending_providers").document(pending.id)
-            val providerRef = firestore.collection("service_providers").document(approved.id)
-            transaction.delete(pendingRef)
-            transaction.set(providerRef, approved)
-        }.addOnCompleteListener { task ->
-            onComplete(task.isSuccessful)
-        }
-    }
-
-    // Direct registration (Direct add - bypass review, owner/admin level)
-    fun addProviderDirectly(
-        name: String,
-        phone: String,
-        categoryId: String,
-        categoryName: String,
-        address: String,
-        region: String,
-        gpsLat: Double,
-        gpsLng: Double,
-        personalPhoto: String,
-        onComplete: (Boolean) -> Unit
-    ) {
-        val newId = "prov_dir_${System.currentTimeMillis()}"
-        val obj = ServiceProvider(
-            id = newId,
-            name = name,
-            phone = phone,
-            categoryId = categoryId,
-            categoryName = categoryName,
-            address = address,
-            region = region,
-            gpsLat = gpsLat,
-            gpsLng = gpsLng,
-            personalPhoto = personalPhoto.ifEmpty { "https://picsum.photos/150/150?random=${System.currentTimeMillis() % 100}" },
-            registeredAt = System.currentTimeMillis()
-        )
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value + obj
-            onComplete(true)
-            return
-        }
-        db?.collection("service_providers")?.document(newId)?.set(obj)
-            ?.addOnCompleteListener { task ->
-                onComplete(task.isSuccessful)
-            } ?: run {
-                _providers.value = _providers.value + obj
-                onComplete(true)
-            }
-    }
-
-    // Reject pending provider with reason
-    fun rejectProvider(pendingId: String, reason: String, onComplete: (Boolean) -> Unit) {
-        if (isUsingOfflineMock) {
-            _pendingProviders.value = _pendingProviders.value.filter { it.id != pendingId }
-            onComplete(true)
-            return
-        }
-        db?.collection("pending_providers")?.document(pendingId)?.update("rejectReason", reason)
-            ?.addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    // Optionally delete application from pending after rejection setting
-                    db?.collection("pending_providers")?.document(pendingId)?.delete()
+        if (firestore != null) {
+            // Write to pending
+            firestore.collection("pending_providers").document(freshId).set(provider)
+                .addOnSuccessListener {
+                    firestore.collection("activity_logs").document(alert.id).set(alert)
+                    onComplete(true)
                 }
-                onComplete(task.isSuccessful)
-            } ?: run {
-                _pendingProviders.value = _pendingProviders.value.filter { it.id != pendingId }
-                onComplete(true)
-            }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            // Memory update
+            val currentPending = _pendingProviders.value.toMutableList()
+            currentPending.add(provider)
+            _pendingProviders.value = currentPending
+
+            val currentLogs = _activityLogs.value.toMutableList()
+            currentLogs.add(alert)
+            _activityLogs.value = currentLogs
+            onComplete(true)
+        }
     }
 
-    // Pin provider
+    fun acceptRegistration(pending: ServiceProvider, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        pending.subscriptionStatus = "none"
+
+        val alert = ActivityLog(
+            id = "log_" + System.currentTimeMillis(),
+            title = "ترخيص مهني مكتمل",
+            description = "تم قبول طلب انضمام ${pending.name} بنجاح.",
+            category = "registration"
+        )
+
+        if (firestore != null) {
+            firestore.runTransaction { transaction ->
+                val pendingRef = firestore.collection("pending_providers").document(pending.id)
+                val providerRef = firestore.collection("service_providers").document(pending.id)
+                val logRef = firestore.collection("activity_logs").document(alert.id)
+
+                transaction.delete(pendingRef)
+                transaction.set(providerRef, pending)
+                transaction.set(logRef, alert)
+            }.addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            // Offline transition
+            val currentPending = _pendingProviders.value.toMutableList()
+            currentPending.removeAll { it.id == pending.id }
+            _pendingProviders.value = currentPending
+
+            val currentActive = _providers.value.toMutableList()
+            currentActive.add(pending)
+            _providers.value = currentActive
+
+            val currentLogs = _activityLogs.value.toMutableList()
+            currentLogs.add(alert)
+            _activityLogs.value = currentLogs
+            onComplete(true)
+        }
+    }
+
+    fun rejectRegistration(pendingId: String, reason: String, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val alert = ActivityLog(
+            id = "log_" + System.currentTimeMillis(),
+            title = "تم رفض طلب التسجيل",
+            description = "تم رفض الطلب رقم $pendingId. السبب: $reason",
+            category = "registration"
+        )
+
+        if (firestore != null) {
+            firestore.runTransaction { transaction ->
+                val pendingRef = firestore.collection("pending_providers").document(pendingId)
+                val logRef = firestore.collection("activity_logs").document(alert.id)
+
+                transaction.delete(pendingRef)
+                transaction.set(logRef, alert)
+            }.addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val currentPending = _pendingProviders.value.toMutableList()
+            currentPending.removeAll { it.id == pendingId }
+            _pendingProviders.value = currentPending
+
+            val currentLogs = _activityLogs.value.toMutableList()
+            currentLogs.add(alert)
+            _activityLogs.value = currentLogs
+            onComplete(true)
+        }
+    }
+
+    // Pin, Recommendation, Verification and blocking toggles
     fun togglePinProvider(providerId: String, isPinned: Boolean) {
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(isPinned = isPinned) else it
-            }
-            return
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("service_providers").document(providerId).update("pinned", isPinned)
+        } else {
+            val list = _providers.value.toMutableList()
+            list.find { it.id == providerId }?.isPinned = isPinned
+            _providers.value = list
         }
-        db?.collection("service_providers")?.document(providerId)?.update("isPinned", isPinned)
     }
 
-    // Recommend provider
     fun toggleRecommendProvider(providerId: String, isRecommended: Boolean) {
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(isRecommended = isRecommended) else it
-            }
-            return
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("service_providers").document(providerId).update("recommended", isRecommended)
+        } else {
+            val list = _providers.value.toMutableList()
+            list.find { it.id == providerId }?.isRecommended = isRecommended
+            _providers.value = list
         }
-        db?.collection("service_providers")?.document(providerId)?.update("isRecommended", isRecommended)
     }
 
-    // Verify provider (Blue badge)
     fun toggleVerifyProvider(providerId: String, isVerified: Boolean) {
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(isVerified = isVerified) else it
-            }
-            return
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("service_providers").document(providerId).update("verified", isVerified)
+        } else {
+            val list = _providers.value.toMutableList()
+            list.find { it.id == providerId }?.isVerified = isVerified
+            _providers.value = list
         }
-        db?.collection("service_providers")?.document(providerId)?.update("isVerified", isVerified)
     }
 
-    // Block/Unblock provider
     fun toggleBlockProvider(providerId: String, isBlocked: Boolean) {
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(isBlocked = isBlocked) else it
-            }
-            return
-        }
-        db?.collection("service_providers")?.document(providerId)?.update("isBlocked", isBlocked)
-    }
-
-    // Add / Update / Delete Categories
-    fun addOrUpdateCategory(cat: Category) {
-        val catId = cat.id.ifEmpty { "c_${System.currentTimeMillis()}" }
-        val finalCat = cat.copy(id = catId)
-        if (isUsingOfflineMock) {
-            _categories.value = _categories.value.filter { it.id != catId } + finalCat
-            return
-        }
-        db?.collection("categories")?.document(catId)?.set(finalCat)
-    }
-
-    fun deleteCategory(catId: String) {
-        if (isUsingOfflineMock) {
-            _categories.value = _categories.value.filter { it.id != catId }
-            return
-        }
-        db?.collection("categories")?.document(catId)?.delete()
-    }
-
-    // Submit user review for provider with optional rating points
-    fun submitReview(providerId: String, userName: String, rating: Int, comment: String) {
-        val reviewId = "rev_${System.currentTimeMillis()}"
-        val obj = Review(reviewId, providerId, userName, rating, comment, System.currentTimeMillis())
-        
-        // Award loyalty points to reviewer if tracked, and update rating logic
-        if (isUsingOfflineMock) {
-            _reviews.value = _reviews.value + obj
-            updateLocalProviderRating(providerId, rating)
-            return
-        }
-
-        db?.collection("reviews")?.document(reviewId)?.set(obj)?.addOnSuccessListener {
-            // Update average rating on target provider
-            val prov = _providers.value.find { it.id == providerId }
-            if (prov != null) {
-                val newCount = prov.ratingCount + 1
-                val newRating = ((prov.rating * prov.ratingCount) + rating) / newCount
-                val newPoints = prov.loyaltyPoints + 15 // award 15 loyalty points on review!
-                db?.collection("service_providers")?.document(providerId)?.update(
-                    mapOf(
-                        "rating" to newRating,
-                        "ratingCount" to newCount,
-                        "loyaltyPoints" to newPoints
-                    )
-                )
-            }
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("service_providers").document(providerId).update("blocked", isBlocked)
+        } else {
+            val list = _providers.value.toMutableList()
+            list.find { it.id == providerId }?.isBlocked = isBlocked
+            _providers.value = list
         }
     }
 
-    private fun updateLocalProviderRating(providerId: String, rating: Int) {
-        _providers.value = _providers.value.map { prov ->
-            if (prov.id == providerId) {
-                val newCount = prov.ratingCount + 1
-                val newRating = ((prov.rating * prov.ratingCount) + rating) / newCount
-                val newPoints = prov.loyaltyPoints + 15
-                prov.copy(rating = newRating, ratingCount = newCount, loyaltyPoints = newPoints)
-            } else prov
-        }
-    }
+    // Direct Manual Addition bypasses general approvals
+    fun addProviderManually(provider: ServiceProvider, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val freshId = if (provider.id.isEmpty()) "manual_" + System.currentTimeMillis() else provider.id
+        provider.id = freshId
+        provider.isVerified = true // Auto true for manual additions
 
-    // Redeem points logic
-    fun redeemLoyaltyPoints(providerId: String, pointsToDeduct: Int, onResult: (Boolean) -> Unit) {
-        val prov = _providers.value.find { it.id == providerId } ?: return onResult(false)
-        if (prov.loyaltyPoints < pointsToDeduct) {
-            onResult(false)
-            return
-        }
-        val nextPoints = prov.loyaltyPoints - pointsToDeduct
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(loyaltyPoints = nextPoints) else it
-            }
-            onResult(true)
-            return
-        }
-        db?.collection("service_providers")?.document(providerId)?.update("loyaltyPoints", nextPoints)
-            ?.addOnCompleteListener { onResult(it.isSuccessful) }
-    }
-
-    // Premium status toggles
-    fun requestPremiumSubscription(providerId: String, onComplete: (Boolean) -> Unit) {
-        // Mock intermediate approval state
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(isPremium = true, premiumApproved = false) else it
-            }
+        if (firestore != null) {
+            firestore.collection("service_providers").document(freshId).set(provider)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _providers.value.toMutableList()
+            list.add(provider)
+            _providers.value = list
             onComplete(true)
-            return
         }
-        db?.collection("service_providers")?.document(providerId)
-            ?.update(mapOf("isPremium" to true, "premiumApproved" to false))
-            ?.addOnCompleteListener { onComplete(it.isSuccessful) }
     }
 
-    fun approvePremium(providerId: String, approved: Boolean) {
-        if (isUsingOfflineMock) {
-            _providers.value = _providers.value.map {
-                if (it.id == providerId) it.copy(premiumApproved = approved, isPremium = approved) else it
+    // Monthly Subscriptions monthly premium trigger
+    fun requestPremiumSubscription(providerId: String, phone: String, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val alert = ActivityLog(
+            id = "log_" + System.currentTimeMillis(),
+            title = "طلب اشتراك مميز شهري",
+            description = "طلب مزود خدمة $providerId تفعيل اشتراك مميز شهري برقم هاتف $phone.",
+            category = "subscription"
+        )
+        if (firestore != null) {
+            firestore.runTransaction { transaction ->
+                val providerRef = firestore.collection("service_providers").document(providerId)
+                val logRef = firestore.collection("activity_logs").document(alert.id)
+
+                transaction.update(providerRef, "subscriptionStatus", "pending_approval")
+                transaction.set(logRef, alert)
+            }.addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _providers.value.toMutableList()
+            list.find { it.id == providerId }?.let {
+                it.subscriptionStatus = "pending_approval"
             }
-            return
+            _providers.value = list
+
+            val currentLogs = _activityLogs.value.toMutableList()
+            currentLogs.add(alert)
+            _activityLogs.value = currentLogs
+            onComplete(true)
         }
-        db?.collection("service_providers")?.document(providerId)
-            ?.update(mapOf("premiumApproved" to approved, "isPremium" to approved))
     }
 
-    // Real-time Chat
-    fun sendChatMessage(providerId: String, userId: String, senderName: String, senderType: String, messageText: String) {
-        val msgId = "msg_${System.currentTimeMillis()}"
-        val obj = ChatMessage(msgId, providerId, userId, senderName, senderType, messageText, System.currentTimeMillis())
-        if (isUsingOfflineMock) {
-            _chats.value = _chats.value + obj
-            return
+    fun approvePremiumSubscription(providerId: String, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val expiry = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000 // 30 Days
+        val alert = ActivityLog(
+            id = "log_" + System.currentTimeMillis(),
+            title = "تفعيل الاشتراك المميز",
+            description = "تمت الموافقة وتفعيل شارة التميز لمزود الخدمة $providerId للشهر الجاري.",
+            category = "subscription"
+        )
+
+        if (firestore != null) {
+            firestore.runTransaction { transaction ->
+                val providerRef = firestore.collection("service_providers").document(providerId)
+                val logRef = firestore.collection("activity_logs").document(alert.id)
+
+                transaction.update(providerRef, "subscriptionStatus", "active")
+                transaction.update(providerRef, "subscriptionExpiry", expiry)
+                transaction.update(providerRef, "premium", true)
+            }.addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _providers.value.toMutableList()
+            list.find { it.id == providerId }?.let {
+                it.subscriptionStatus = "active"
+                it.subscriptionExpiry = expiry
+                it.isPremium = true
+            }
+            _providers.value = list
+
+            val currentLogs = _activityLogs.value.toMutableList()
+            currentLogs.add(alert)
+            _activityLogs.value = currentLogs
+            onComplete(true)
         }
-        db?.collection("chats")?.document(msgId)?.set(obj)
     }
 
-    // Send admin complaint
-    fun submitComplaint(providerId: String, providerName: String, userName: String, userPhone: String, text: String) {
-        val cid = "comp_${System.currentTimeMillis()}"
-        val obj = Complaint(cid, providerId, providerName, userName, userPhone, text, System.currentTimeMillis())
-        if (isUsingOfflineMock) {
-            _complaints.value = _complaints.value + obj
-            return
+    // Management of categories & subcategories from admin panel
+    fun addMainCategory(category: Category, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val freshId = "cat_" + System.currentTimeMillis()
+        category.id = freshId
+        category.displayOrder = _categories.value.size + 1
+
+        if (firestore != null) {
+            firestore.collection("categories").document(freshId).set(category)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _categories.value.toMutableList()
+            list.add(category)
+            _categories.value = list
+            onComplete(true)
         }
-        db?.collection("complaints")?.document(cid)?.set(obj)
     }
 
-    // Direct add service order
-    fun addServiceOrder(provider: ServiceProvider, userName: String, userPhone: String, details: String) {
-        val oid = "ord_${System.currentTimeMillis()}"
-        val obj = ServiceOrder(oid, provider.id, provider.name, provider.phone, userName, userPhone, details, "completed", System.currentTimeMillis())
-        if (isUsingOfflineMock) {
-            _serviceOrders.value = _serviceOrders.value + obj
-            return
+    fun addSubCategory(sub: SubCategory, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val freshId = "sub_" + System.currentTimeMillis()
+        sub.id = freshId
+
+        if (firestore != null) {
+            firestore.collection("subcategories").document(freshId).set(sub)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _subCategories.value.toMutableList()
+            list.add(sub)
+            _subCategories.value = list
+            onComplete(true)
         }
-        db?.collection("service_orders")?.document(oid)?.set(obj)
     }
 
-    // Backup actions
-    fun performBackup(context: Context, mode: String, folderPath: String): String {
-        // Convert local databases state to readable JSON output
-        try {
-            val json = """
-                {
-                  "appName": "${settings.value.appNameAr}",
-                  "categories_count": ${categories.value.size},
-                  "providers_count": ${providers.value.size},
-                  "reviews_count": ${reviews.value.size}
+    // Reports/Complaints submitting engine
+    fun submitReport(provider: ServiceProvider, reason: String, reporterName: String, reporterPhone: String, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val freshId = "comp_" + System.currentTimeMillis()
+        val complaint = Complaint(
+            id = freshId,
+            providerId = provider.id,
+            providerName = provider.name,
+            reporterName = reporterName.ifEmpty { "زائر" },
+            reporterPhone = reporterPhone,
+            reasonText = reason
+        )
+        val alert = ActivityLog(
+            id = "log_" + System.currentTimeMillis(),
+            title = "بلاغ شكوى جديد",
+            description = "تم تقديم بلاغ ضد المهني ${provider.name}. السبب: $reason",
+            category = "reports"
+        )
+
+        if (firestore != null) {
+            firestore.runTransaction { transaction ->
+                val compRef = firestore.collection("complaints").document(freshId)
+                val logRef = firestore.collection("activity_logs").document(alert.id)
+
+                transaction.set(compRef, complaint)
+                transaction.set(logRef, alert)
+            }.addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _complaints.value.toMutableList()
+            list.add(0, complaint)
+            _complaints.value = list
+
+            val currentLogs = _activityLogs.value.toMutableList()
+            currentLogs.add(alert)
+            _activityLogs.value = currentLogs
+            onComplete(true)
+        }
+    }
+
+    fun deleteComplaint(complaintId: String) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("complaints").document(complaintId).delete()
+        } else {
+            val list = _complaints.value.toMutableList()
+            list.removeAll { it.id == complaintId }
+            _complaints.value = list
+        }
+    }
+
+    // Manage supervisor accounts
+    fun addAdminUser(newAdmin: AdminUser, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val id = "adm_" + System.currentTimeMillis()
+        newAdmin.id = id
+        if (firestore != null) {
+            firestore.collection("admins").document(id).set(newAdmin)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _admins.value.toMutableList()
+            list.add(newAdmin)
+            _admins.value = list
+            onComplete(true)
+        }
+    }
+
+    fun removeAdminUser(adminId: String) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("admins").document(adminId).delete()
+        } else {
+            val list = _admins.value.toMutableList()
+            list.removeAll { it.id == adminId }
+            _admins.value = list
+        }
+    }
+
+    // Whitelisted devices
+    fun addWhitelistedDevice(device: WhitelistedDevice, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("whitelisted_devices").document(device.deviceId).set(device)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _whitelistedDevices.value.toMutableList()
+            list.add(device)
+            _whitelistedDevices.value = list
+            onComplete(true)
+        }
+    }
+
+    fun removeWhitelistedDevice(deviceId: String) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("whitelisted_devices").document(deviceId).delete()
+        } else {
+            val list = _whitelistedDevices.value.toMutableList()
+            list.removeAll { it.deviceId == deviceId }
+            _whitelistedDevices.value = list
+        }
+    }
+
+    // Secure auth notification logger
+    fun logUnauthorizedAttempt(deviceInfo: String) {
+        val firestore = db
+        val alert = ActivityLog(
+            id = "sec_" + System.currentTimeMillis(),
+            title = "محاولة دخول غير مصرح بها",
+            description = "جرت محاولة دخول من جهاز غير موثق: $deviceInfo",
+            category = "security"
+        )
+        if (firestore != null) {
+            firestore.collection("activity_logs").document(alert.id).set(alert)
+        } else {
+            val list = _activityLogs.value.toMutableList()
+            list.add(0, alert)
+            _activityLogs.value = list
+        }
+    }
+
+    fun readAllLogs() {
+        // Clear notifications or mark read
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("activity_logs").get().addOnSuccessListener { query ->
+                for (doc in query.documents) {
+                    doc.reference.update("read", true)
                 }
-            """.trimIndent()
-            val file = File(context.cacheDir, "dalili_backup_${System.currentTimeMillis()}.json")
-            val writer = FileWriter(file)
-            writer.write(json)
-            writer.flush()
-            writer.close()
-            return file.absolutePath
-        } catch (e: Exception) {
-            return "Failed: ${e.message}"
+            }
+        } else {
+            val list = _activityLogs.value.toMutableList()
+            list.forEach { it.isRead = true }
+            _activityLogs.value = list
         }
     }
 
-    // Restore Backup Mock
-    fun restoreBackupMock(dataJson: String): Boolean {
-        // Restores some configurations or settings from formatted string
-        return dataJson.contains("dalili")
-    }
+    // --- MANAGE TOP BANNERS ---
+    fun addBanner(banner: Banner, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val id = "banner_" + System.currentTimeMillis()
+        banner.id = id
+        banner.expiryTimestamp = System.currentTimeMillis() + (banner.durationSeconds * 1000L * 60)
 
-    // Banners manager
-    fun addOrUpdateBanner(banner: Banner) {
-        val bid = banner.id.ifEmpty { "b_${System.currentTimeMillis()}" }
-        val finalBanner = banner.copy(id = bid)
-        if (isUsingOfflineMock) {
-            _banners.value = _banners.value.filter { it.id != bid } + finalBanner
-            return
+        if (firestore != null) {
+            firestore.collection("banners").document(id).set(banner)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _banners.value.toMutableList()
+            list.add(banner)
+            _banners.value = list
+            onComplete(true)
         }
-        db?.collection("banners")?.document(bid)?.set(finalBanner)
     }
 
-    fun deleteBanner(bid: String) {
-        if (isUsingOfflineMock) {
-            _banners.value = _banners.value.filter { it.id != bid }
-            return
+    fun deleteBanner(bannerId: String, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("banners").document(bannerId).delete()
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _banners.value.toMutableList()
+            list.removeAll { it.id == bannerId }
+            _banners.value = list
+            onComplete(true)
         }
-        db?.collection("banners")?.document(bid)?.delete()
     }
 
-    // Helper update function for testing
-    fun forceSync() {
-        Log.i("Dalili", "Data refresh requested manually.")
-        setupSnapshotListeners()
+    // Service order simulator for dashboard CUJs
+    fun recordServiceRequest(provider: ServiceProvider) {
+        val order = ServiceOrder(
+            id = "ord_" + System.currentTimeMillis(),
+            userId = "guest_user",
+            providerId = provider.id,
+            providerName = provider.name,
+            categoryName = provider.categoryName,
+            orderDate = System.currentTimeMillis(),
+            status = "completed"
+        )
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("service_orders").document(order.id).set(order)
+        } else {
+            val list = _serviceOrders.value.toMutableList()
+            list.add(0, order)
+            _serviceOrders.value = list
+        }
+    }
+
+    // Peer to peer chat messages
+    fun sendChatMessage(msg: ChatMessage) {
+        val firestore = db
+        val id = "chat_" + System.currentTimeMillis()
+        msg.id = id
+        if (firestore != null) {
+            firestore.collection("chats").document(id).set(msg)
+        } else {
+            val list = _chats.value.toMutableList()
+            list.add(msg)
+            _chats.value = list
+        }
+    }
+
+    // --- BACKUP SYSTEMS: Local Storage backup output ---
+    fun triggerBackupDatabase(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val fullBackup = JSONObject()
+                
+                // Categories
+                val catsArray = JSONArray()
+                _categories.value.forEach {
+                    catsArray.put(JSONObject().apply {
+                        put("id", it.id)
+                        put("nameAr", it.nameAr)
+                        put("nameEn", it.nameEn)
+                        put("imageUrl", it.imageUrl)
+                        put("displayOrder", it.displayOrder)
+                    })
+                }
+                fullBackup.put("categories", catsArray)
+
+                // SubCategories
+                val subArray = JSONArray()
+                _subCategories.value.forEach {
+                    subArray.put(JSONObject().apply {
+                        put("id", it.id)
+                        put("categoryId", it.categoryId)
+                        put("nameAr", it.nameAr)
+                        put("nameEn", it.nameEn)
+                    })
+                }
+                fullBackup.put("subCategories", subArray)
+
+                // Providers
+                val provArray = JSONArray()
+                _providers.value.forEach {
+                    provArray.put(JSONObject().apply {
+                        put("id", it.id)
+                        put("name", it.name)
+                        put("phone", it.phone)
+                        put("categoryId", it.categoryId)
+                        put("categoryName", it.categoryName)
+                        put("region", it.region)
+                        put("address", it.address)
+                        put("isVerified", it.isVerified)
+                        put("isPinned", it.isPinned)
+                        put("isRecommended", it.isRecommended)
+                        put("isPremium", it.isPremium)
+                    })
+                }
+                fullBackup.put("providers", provArray)
+
+                // Settings
+                val s = _settings.value
+                val settObj = JSONObject().apply {
+                    put("appNameAr", s.appNameAr)
+                    put("appNameEn", s.appNameEn)
+                    put("promoFooterText", s.promoFooterText)
+                    put("supportPhone", s.supportPhone)
+                    put("supportEmail", s.supportEmail)
+                    put("supportWhatsapp", s.supportWhatsapp)
+                    put("primaryColor", s.primaryColor)
+                    put("secondaryColor", s.secondaryColor)
+                    put("themeChoice", s.themeChoice)
+                    put("assistantEnabled", s.assistantEnabled)
+                    put("assistantSize", s.assistantSize)
+                }
+                fullBackup.put("settings", settObj)
+
+                // Save to filesDir
+                val file = File(context.filesDir, "dalili_db_backup.json")
+                val fos = FileOutputStream(file)
+                fos.write(fullBackup.toString(4).toByteArray())
+                fos.close()
+
+                onResult("تم أخذ نسخة احتياطية محلية وتخزينها كملف JSON بنجاح!")
+            } catch (e: Exception) {
+                onResult("فشل نسخ البيانات احتياطياً: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    fun restoreDatabaseFromBackup(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val file = File(context.filesDir, "dalili_db_backup.json")
+                if (!file.exists()) {
+                    onResult("عذراً، لم يتم العثور على أي ملف نسخة احتياطية سابقة!")
+                    return@launch
+                }
+                val content = file.readText()
+                val root = JSONObject(content)
+
+                // Restore locally
+                if (root.has("settings")) {
+                    val sObj = root.getJSONObject("settings")
+                    val s = AppSettings(
+                        appNameAr = sObj.optString("appNameAr", "دليلي"),
+                        appNameEn = sObj.optString("appNameEn", "Dalili"),
+                        promoFooterText = sObj.optString("promoFooterText", "MAW 777644670"),
+                        supportPhone = sObj.optString("supportPhone", "777644670"),
+                        supportEmail = sObj.optString("supportEmail", "support@dalili.com"),
+                        supportWhatsapp = sObj.optString("supportWhatsapp", "777644670"),
+                        primaryColor = sObj.optString("primaryColor", "#1A237E"),
+                        secondaryColor = sObj.optString("secondaryColor", "#FFD700"),
+                        themeChoice = sObj.optString("themeChoice", "dark"),
+                        assistantEnabled = sObj.optBoolean("assistantEnabled", true),
+                        assistantSize = sObj.optString("assistantSize", "medium")
+                    )
+                    updateSettings(s) {}
+                }
+
+                val firestore = db
+                if (firestore != null) {
+                    // Update Firestore if online
+                    if (root.has("categories")) {
+                        val cats = root.getJSONArray("categories")
+                        for (i in 0 until cats.length()) {
+                            val cObj = cats.getJSONObject(i)
+                            val cat = Category(
+                                id = cObj.getString("id"),
+                                nameAr = cObj.getString("nameAr"),
+                                nameEn = cObj.getString("nameEn"),
+                                imageUrl = cObj.getString("imageUrl"),
+                                displayOrder = cObj.getInt("displayOrder")
+                            )
+                            firestore.collection("categories").document(cat.id).set(cat)
+                        }
+                    }
+                }
+                
+                onResult("تمت استعادة البيانات والإعدادات من النسخة الإحتياطية وتحديثها فوراً!")
+            } catch (e: Exception) {
+                onResult("فشل استعادة النسخة الاحتياطية: ${e.localizedMessage}")
+            }
+        }
     }
 
     override fun onCleared() {
         super.onCleared()
-        // Safely detach all snapshot listeners to avoid memory leaks
-        registrations.forEach { it.remove() }
-        registrations.clear()
+        listeners.forEach { it.remove() }
     }
 }

@@ -1,72 +1,76 @@
 package com.example.ui
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val DarkGray = Color(0xFF121214)
-val SurfaceGray = Color(0xFF1E1E22)
-
-// Silver Themes
-val SilverPrimary = Color(0xFFCFD2EB)
-val SilverSecondary = Color(0xFF708090)
-val SilverBackground = Color(0xFF10131A)
-
-// Gold Themes
-val GoldPrimary = Color(0xFFD4AF37)
-val GoldSecondary = Color(0xFFDEB887)
-val GoldBackground = Color(0xFF141210)
-
-// Emerald Themes
-val EmeraldPrimary = Color(0xFF42B37A)
-val EmeraldSecondary = Color(0xFF2E6B47)
-val EmeraldBackground = Color(0xFF0F1511)
+fun parseColorHex(hexStr: String, fallback: Color): Color {
+    return try {
+        if (hexStr.startsWith("#")) {
+            Color(android.graphics.Color.parseColor(hexStr))
+        } else {
+            Color(android.graphics.Color.parseColor("#$hexStr"))
+        }
+    } catch (e: Exception) {
+        fallback
+    }
+}
 
 @Composable
 fun DaliliTheme(
-    themeChoice: String,
-    customPrimaryStr: String = "",
-    customSecondaryStr: String = "",
+    themeChoice: String = "dark",
+    customPrimaryStr: String = "#1A237E",
+    customSecondaryStr: String = "#FFD700",
     content: @Composable () -> Unit
 ) {
-    val primaryColor = when (themeChoice) {
-        "silver" -> SilverPrimary
-        "emerald" -> EmeraldPrimary
-        "custom" -> {
-            try { Color(android.graphics.Color.parseColor(customPrimaryStr)) }
-            catch (e: Exception) { GoldPrimary }
+    val primaryColor = parseColorHex(customPrimaryStr, Color(0xFF1A1A40))
+    val secondaryColor = parseColorHex(customSecondaryStr, Color(0xFFEAA611))
+
+    val colorScheme = when (themeChoice) {
+        "light" -> {
+            lightColorScheme(
+                primary = primaryColor,
+                secondary = secondaryColor,
+                background = Color(0xFFF8F9FA),
+                surface = Color(0xFFFFFFFF),
+                onPrimary = Color.White,
+                onSecondary = Color.Black,
+                onBackground = Color(0xFF212529),
+                onSurface = Color(0xFF212529),
+                outline = Color(0xFFDEE2E6)
+            )
         }
-        else -> GoldPrimary // gold is default
-    }
-
-    val secondaryColor = when (themeChoice) {
-        "silver" -> SilverSecondary
-        "emerald" -> EmeraldSecondary
-        "custom" -> {
-            try { Color(android.graphics.Color.parseColor(customSecondaryStr)) }
-            catch (e: Exception) { GoldSecondary }
+        "cosmic" -> {
+            // High contrast cosmic slate theme
+            darkColorScheme(
+                primary = primaryColor,
+                secondary = secondaryColor,
+                background = Color(0xFF020715),
+                surface = Color(0xFF0B1430),
+                onPrimary = Color.White,
+                onSecondary = Color.Black,
+                onBackground = Color(0xFFE2E8F0),
+                onSurface = Color(0xFFF8FAFC),
+                outline = Color(0xFF1E293B)
+            )
         }
-        else -> GoldSecondary
+        else -> { // Default "dark" theme
+            darkColorScheme(
+                primary = primaryColor,
+                secondary = secondaryColor,
+                background = Color(0xFF121212),
+                surface = Color(0xFF1E1E1E),
+                onPrimary = Color.White,
+                onSecondary = Color.Black,
+                onBackground = Color(0xFFE0E0E0),
+                onSurface = Color(0xFFFFFFFF),
+                outline = Color(0xFF2C2C2C)
+            )
+        }
     }
-
-    val backgroundColor = when (themeChoice) {
-        "silver" -> SilverBackground
-        "emerald" -> EmeraldBackground
-        "custom" -> DarkGray
-        else -> GoldBackground
-    }
-
-    val colorScheme = darkColorScheme(
-        primary = primaryColor,
-        secondary = secondaryColor,
-        background = backgroundColor,
-        surface = SurfaceGray,
-        onPrimary = Color.Black,
-        onSecondary = Color.White,
-        onBackground = Color.White,
-        onSurface = Color.White
-    )
 
     MaterialTheme(
         colorScheme = colorScheme,
