@@ -608,6 +608,68 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun updateMainCategory(category: Category, onComplete: (Boolean) -> Unit = {}) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("categories").document(category.id).set(category)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _categories.value.toMutableList()
+            val index = list.indexOfFirst { it.id == category.id }
+            if (index != -1) {
+                list[index] = category
+                _categories.value = list
+            }
+            onComplete(true)
+        }
+    }
+
+    fun deleteMainCategory(categoryId: String, onComplete: (Boolean) -> Unit = {}) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("categories").document(categoryId).delete()
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _categories.value.toMutableList()
+            list.removeAll { it.id == categoryId }
+            _categories.value = list
+            onComplete(true)
+        }
+    }
+
+    fun updateSubCategory(sub: SubCategory, onComplete: (Boolean) -> Unit = {}) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("subcategories").document(sub.id).set(sub)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _subCategories.value.toMutableList()
+            val index = list.indexOfFirst { it.id == sub.id }
+            if (index != -1) {
+                list[index] = sub
+                _subCategories.value = list
+            }
+            onComplete(true)
+        }
+    }
+
+    fun deleteSubCategory(subId: String, onComplete: (Boolean) -> Unit = {}) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("subcategories").document(subId).delete()
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _subCategories.value.toMutableList()
+            list.removeAll { it.id == subId }
+            _subCategories.value = list
+            onComplete(true)
+        }
+    }
+
     // Reports/Complaints submitting engine
     fun submitReport(provider: ServiceProvider, reason: String, reporterName: String, reporterPhone: String, onComplete: (Boolean) -> Unit) {
         val firestore = db
@@ -812,6 +874,43 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             val list = _chats.value.toMutableList()
             list.add(msg)
             _chats.value = list
+        }
+    }
+
+    fun clearAllChats(onComplete: (Boolean) -> Unit = {}) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("chats")
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    val batch = firestore.batch()
+                    snapshot.documents.forEach { doc ->
+                        batch.delete(doc.reference)
+                    }
+                    batch.commit()
+                        .addOnSuccessListener {
+                            _chats.value = emptyList()
+                            onComplete(true)
+                        }
+                        .addOnFailureListener { onComplete(false) }
+                }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            _chats.value = emptyList()
+            onComplete(true)
+        }
+    }
+
+    fun refreshAllData(onComplete: (Boolean) -> Unit = {}) {
+        try {
+            listeners.forEach {
+                try { it.remove() } catch (ex: Exception) {}
+            }
+            listeners.clear()
+            setupRealtimeSync()
+            onComplete(true)
+        } catch (e: Exception) {
+            onComplete(false)
         }
     }
 

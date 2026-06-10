@@ -10,16 +10,25 @@ data class AppSettings(
     var supportPhone: String = "777644670",
     var supportEmail: String = "support@dalili.com",
     var supportWhatsapp: String = "777644670",
-    var primaryColor: String = "#1A237E", // Royal Indigo Blue
-    var secondaryColor: String = "#FFD700", // Gold Accent
-    var themeChoice: String = "dark", // dark, light, cosmic
+    var primaryColor: String = "#1B5E20", // Emerald Green
+    var secondaryColor: String = "#FFC700", // Gold Accent
+    var themeChoice: String = "emerald", // emerald, dark, light, cosmic
     var assistantEnabled: Boolean = true,
     var assistantIconUrl: String = "", // empty means default robotic emoji
     var assistantSize: String = "medium", // small, medium, large
     var maxRadiusDefault: Float = 30f,
     var isMaintenanceMode: Boolean = false,
     var maintenanceMessage: String = "التطبيق في وضع الصيانة حالياً لخدمتكم بشكل أفضل.",
-    var layoutFormat: String = "standard"
+    var layoutFormat: String = "standard",
+    var topBarIconOrder: String = "home,login,register,lang",
+    var isChatEnabled: Boolean = true,
+    var chatIconSize: Int = 28, // Default 50% smaller than 56.dp
+    var chatIconColor: String = "#0288D1", // default blue
+    var chatVisibility: String = "visible", // visible, hidden, deleted
+    var chatDisabledMessage: String = "نعتذر، خدمة المحادثة الفورية معطلة حالياً بطلب من الإدارة.",
+    var globalTextSize: Int = 16,
+    var globalTextColor: String = "#FFFFFF",
+    var globalFontFamily: String = "Cairo"
 ) : Serializable
 
 // ServiceProvider represents professionals on our main list

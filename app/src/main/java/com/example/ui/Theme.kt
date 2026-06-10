@@ -43,6 +43,19 @@ fun DaliliTheme(
                 outline = Color(0xFFDEE2E6)
             )
         }
+        "emerald" -> {
+            lightColorScheme(
+                primary = parseColorHex(customPrimaryStr, Color(0xFF1B5E20)),
+                secondary = parseColorHex(customSecondaryStr, Color(0xFFFFC700)),
+                background = Color(0xFFFFFFFF),
+                surface = Color(0xFFF5F5F5),
+                onPrimary = Color.White,
+                onSecondary = Color.Black,
+                onBackground = Color(0xFF000000),
+                onSurface = Color(0xFF000000),
+                outline = Color(0xFFE0E0E0)
+            )
+        }
         "cosmic" -> {
             // High contrast cosmic slate theme
             darkColorScheme(

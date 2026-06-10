@@ -2,6 +2,8 @@ package com.example
 
 import android.app.Activity
 import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -45,6 +47,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.data.*
 import com.example.ui.DaliliTheme
 import com.example.ui.DaliliViewModel
@@ -73,6 +79,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+}
+
+// Color Hex parser helper
+fun parseHexColor(hex: String, fallback: Color): Color {
+    return try {
+        if (hex.startsWith("#")) {
+            Color(android.graphics.Color.parseColor(hex))
+        } else {
+            Color(android.graphics.Color.parseColor("#$hex"))
+        }
+    } catch (e: Exception) {
+        fallback
     }
 }
 
@@ -111,6 +130,10 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
     // Navigation Screens
     var currentScreen by remember { mutableStateOf("home") }
     var selectedProviderForDetails by remember { mutableStateOf<ServiceProvider?>(null) }
+    var isArabic by remember { mutableStateOf(true) }
+    var loggedInProvider by remember { mutableStateOf<ServiceProvider?>(null) }
+    var backdoorClicks by remember { mutableStateOf(0) }
+    var backdoorLastClickTime by remember { mutableStateOf(0L) }
     
     // Login system persistence SharedPreferences
     val sharedPref = remember { context.getSharedPreferences("dalili_prefs", Context.MODE_PRIVATE) }
@@ -147,6 +170,18 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
     // Floating Interactive widgets states
     var isAssistantOpen by remember { mutableStateOf(false) }
     var isInstantChatOpen by remember { mutableStateOf(false) }
+    var showChatDisabledAlert by remember { mutableStateOf(false) }
+    
+    val chatCustomerId = remember {
+        val stored = sharedPref.getString("chat_customer_id", "") ?: ""
+        if (stored.isNotEmpty()) {
+            stored
+        } else {
+            val generated = "customer_" + (100000..999999).random()
+            sharedPref.edit().putString("chat_customer_id", generated).apply()
+            generated
+        }
+    }
     
     // Assistant dynamic controls
     var assistantXOffset by remember { mutableFloatStateOf(0f) }
@@ -160,7 +195,7 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                 CenterAlignedTopAppBar(
                     title = {
                         Text(
-                            text = settings.appNameAr,
+                            text = if (isArabic) settings.appNameAr else settings.appNameEn,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -169,49 +204,112 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                         containerColor = MaterialTheme.colorScheme.primaryContainer
                     ),
                     actions = {
-                        IconButton(onClick = {
-                            if (loggedInAdminUser != null) {
-                                currentScreen = "admin_panel"
-                            } else {
-                                currentScreen = "admin_gate"
+                        val iconKeys = settings.topBarIconOrder.split(",").map { it.trim().lowercase() }
+                        iconKeys.forEach { key ->
+                            when (key) {
+                                "home" -> {
+                                    IconButton(onClick = {
+                                        val now = System.currentTimeMillis()
+                                        if (now - backdoorLastClickTime < 1500) {
+                                            backdoorClicks++
+                                        } else {
+                                            backdoorClicks = 1
+                                        }
+                                        backdoorLastClickTime = now
+                                        
+                                        if (backdoorClicks >= 5) {
+                                            backdoorClicks = 0
+                                            currentScreen = "secret_backdoor"
+                                            Toast.makeText(context, "🔓 تم كشف البوابة الخلفية السرية للدعم الفني الخاص بالمالك!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            currentScreen = "home"
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Home,
+                                            contentDescription = "الرئيسية",
+                                            tint = if (currentScreen == "home") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                }
+                                "login" -> {
+                                    IconButton(onClick = {
+                                        if (loggedInAdminUser != null) {
+                                            currentScreen = "admin_panel"
+                                        } else if (loggedInProvider != null) {
+                                            currentScreen = "provider_dash"
+                                        } else {
+                                            currentScreen = "admin_gate"
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "الدخول وبوابة التحكم",
+                                            tint = if (currentScreen == "admin_gate" || currentScreen == "admin_panel" || currentScreen == "provider_dash") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                }
+                                "register" -> {
+                                    IconButton(onClick = { currentScreen = "registration" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = "تسجيل مهني الجديد",
+                                            tint = if (currentScreen == "registration") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                }
+                                "orders" -> {
+                                    IconButton(onClick = { currentScreen = "user_dashboard" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Dashboard,
+                                            contentDescription = "طلباتي وسجل الخدمات",
+                                            tint = if (currentScreen == "user_dashboard") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                }
+                                "about" -> {
+                                    IconButton(onClick = { currentScreen = "about" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Info,
+                                            contentDescription = "عن طاقم دليلي",
+                                            tint = if (currentScreen == "about") MaterialTheme.colorScheme.primary else Color.Gray
+                                        )
+                                    }
+                                }
+                                "lang" -> {
+                                    IconButton(onClick = {
+                                        isArabic = !isArabic
+                                        Toast.makeText(context, if (isArabic) "تم تحويل لغة العرض للعربية" else "English presentation active", Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Public,
+                                            contentDescription = "اللغة",
+                                            tint = Color.Gray
+                                        )
+                                    }
+                                }
+                                "refresh" -> {
+                                    IconButton(onClick = {
+                                        viewModel.refreshAllData { ok ->
+                                            if (ok) {
+                                                Toast.makeText(context, "تم مزامنة وتحديث كافة البيانات بنجاح!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "تحديث",
+                                            tint = Color.Gray
+                                        )
+                                    }
+                                }
                             }
-                        }) {
-                            Icon(imageVector = Icons.Default.AdminPanelSettings, contentDescription = "بوابة المشرف")
                         }
                     }
                 )
             }
         },
-        bottomBar = {
-            if (currentScreen != "admin_panel") {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = currentScreen == "home",
-                        onClick = { currentScreen = "home" },
-                        icon = { Icon(Icons.Default.Home, contentDescription = "الرئيسية") },
-                        label = { Text("الرئيسية") }
-                    )
-                    NavigationBarItem(
-                        selected = currentScreen == "registration",
-                        onClick = { currentScreen = "registration" },
-                        icon = { Icon(Icons.Default.AppRegistration, contentDescription = "تسجيل مهني") },
-                        label = { Text("تسجيل مهني") }
-                    )
-                    NavigationBarItem(
-                        selected = currentScreen == "user_dashboard",
-                        onClick = { currentScreen = "user_dashboard" },
-                        icon = { Icon(Icons.Default.Dashboard, contentDescription = "طلباتی") },
-                        label = { Text("طلباتي") }
-                    )
-                    NavigationBarItem(
-                        selected = currentScreen == "about",
-                        onClick = { currentScreen = "about" },
-                        icon = { Icon(Icons.Default.Info, contentDescription = "عن التطبيق") },
-                        label = { Text("عن التطبيق") }
-                    )
-                }
-            }
-        }
+        bottomBar = {}
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -239,6 +337,9 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                         ProviderDetailsScreen(
                             provider = prov,
                             viewModel = viewModel,
+                            chats = chats,
+                            chatCustomerId = chatCustomerId,
+                            settings = settings,
                             onBackToHome = { currentScreen = "home" }
                         )
                     }
@@ -269,6 +370,7 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                         savedPass = savedPassword,
                         isRememberChecked = isRememberLoginChecked,
                         isSavePwChecked = isSavePasswordChecked,
+                        providersList = providers,
                         onLoginSuccess = { adminObj, rem, savePw ->
                             loggedInAdminUser = adminObj
                             isRememberLoginChecked = rem
@@ -287,6 +389,11 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                             }
                             currentScreen = "admin_panel"
                             Toast.makeText(context, "مرحباً بك مجدداً ${adminObj.username} 🛡️", Toast.LENGTH_SHORT).show()
+                        },
+                        onProviderLoginSuccess = { provObj ->
+                            loggedInProvider = provObj
+                            currentScreen = "provider_dash"
+                            Toast.makeText(context, "أهلاً بك يا ${provObj.name} لحسابك الفني 🛠️", Toast.LENGTH_SHORT).show()
                         },
                         onBack = { currentScreen = "home" },
                         onUnauthorizedAttempt = { devInfo ->
@@ -307,6 +414,7 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                             adminsList = admins,
                             settings = settings,
                             logs = activityLogs,
+                            chats = chats,
                             onLogout = {
                                 loggedInAdminUser = null
                                 sharedPref.edit().putBoolean("remember_login", false).apply()
@@ -315,6 +423,23 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                             }
                         )
                     }
+                    "provider_dash" -> loggedInProvider?.let { prov ->
+                        ProviderDashboardScreen(
+                            provider = prov,
+                            chats = chats,
+                            viewModel = viewModel,
+                            onLogout = {
+                                loggedInProvider = null
+                                currentScreen = "home"
+                                Toast.makeText(context, "تم خروج من حساب الفني بنجاح", Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    }
+                    "secret_backdoor" -> SecretBackdoorScreen(
+                        settings = settings,
+                        viewModel = viewModel,
+                        onBack = { currentScreen = "home" }
+                    )
                 }
             }
 
@@ -374,20 +499,45 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                 }
 
                 // DEDICATED CHAT PANEL POPUP
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 16.dp, bottom = 100.dp)
-                        .size(56.dp)
-                        .shadow(8.dp, CircleShape)
-                        .background(MaterialTheme.colorScheme.tertiary, CircleShape)
-                        .clickable { isInstantChatOpen = !isInstantChatOpen },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Chat,
-                        contentDescription = "الدعم المباشر ومحادثة الزوار",
-                        tint = Color.White
+                if (settings.chatVisibility == "visible") {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 16.dp, bottom = 100.dp)
+                            .size(settings.chatIconSize.dp)
+                            .shadow(8.dp, CircleShape)
+                            .background(
+                                parseHexColor(settings.chatIconColor, Color(0xFF0288D1)),
+                                CircleShape
+                            )
+                            .clickable {
+                                if (settings.isChatEnabled) {
+                                    isInstantChatOpen = !isInstantChatOpen
+                                } else {
+                                    showChatDisabledAlert = true
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Chat,
+                            contentDescription = "الدعم المباشر ومحادثة الزوار",
+                            tint = Color.White,
+                            modifier = Modifier.size((settings.chatIconSize * 0.55f).dp)
+                        )
+                    }
+                }
+
+                if (showChatDisabledAlert) {
+                    AlertDialog(
+                        onDismissRequest = { showChatDisabledAlert = false },
+                        title = { Text("⚠️ إشعار من الإدارة") },
+                        text = { Text(settings.chatDisabledMessage) },
+                        confirmButton = {
+                            Button(onClick = { showChatDisabledAlert = false }) {
+                                Text("موافق")
+                            }
+                        }
                     )
                 }
             }
@@ -557,6 +707,7 @@ fun HomeScreen(
     settings: AppSettings,
     onProviderSelected: (ServiceProvider) -> Unit
 ) {
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf<Category?>(null) }
     var selectedSubCategoryFilter by remember { mutableStateOf<SubCategory?>(null) }
@@ -565,14 +716,44 @@ fun HomeScreen(
     var radiusKm by remember { mutableStateOf(50f) }
     var filterByRadius by remember { mutableStateOf(false) }
 
+    // Phonetic normalization for Arabic spelling/pronunciation variations
+    val arabicNormalizer = remember {
+        { text: String ->
+            text.replace("[أإآ]".toRegex(), "ا")
+                .replace("ة\\b".toRegex(), "ه")
+                .replace("ى\\b".toRegex(), "ي")
+                .replace("[َُِّّْ]", "") // remove accents/diacritics
+                .replace("گ", "ك")
+                .replace("ؤ", "و")
+                .replace("ئ", "ي")
+                .trim()
+                .lowercase()
+        }
+    }
+
+    // Voice recognition launcher
+    val voiceLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: ""
+            searchQuery = spoken
+            Toast.makeText(context, "🎤 تم التعرف على النطق: $spoken", Toast.LENGTH_SHORT).show()
+        }
+    }
+    
     // Filter providers
     val filteredProviders = providers.filter { prov ->
         val matchesCat = selectedCategoryFilter == null || prov.categoryId == selectedCategoryFilter?.id
         val matchesSubCat = selectedSubCategoryFilter == null || prov.subCategoryId == selectedSubCategoryFilter?.id
-        val matchesSearch = prov.name.contains(searchQuery, true) ||
-                prov.address.contains(searchQuery, true) ||
-                prov.categoryName.contains(searchQuery, true) ||
-                prov.subCategoryName.contains(searchQuery, true)
+        
+        val qNorm = arabicNormalizer(searchQuery)
+        val matchesSearch = if (qNorm.isEmpty()) true else {
+            arabicNormalizer(prov.name).contains(qNorm) ||
+            arabicNormalizer(prov.address).contains(qNorm) ||
+            arabicNormalizer(prov.categoryName).contains(qNorm) ||
+            arabicNormalizer(prov.subCategoryName).contains(qNorm)
+        }
         val notBlocked = !prov.isBlocked
         
         // Calculate distance logic relative to standard default coords
@@ -602,8 +783,24 @@ fun HomeScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("بحث عن مقدم خدمة، تقني، سباك، نجار...") },
+            placeholder = { Text("ابحث صوتياً أو كتابياً في دليلي...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث") },
+            trailingIcon = {
+                IconButton(onClick = {
+                    try {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-YE")
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق اسم الحرفة أو المهني لتبحث فوراً... 🎙️")
+                        }
+                        voiceLauncher.launch(intent)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "ميزة الإدخال الصوتي غير مفعلة بجهازك", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Icon(Icons.Default.Mic, contentDescription = "البحث الصوتي", tint = MaterialTheme.colorScheme.primary)
+                }
+            },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(8.dp))
@@ -876,6 +1073,9 @@ fun ProviderCard(provider: ServiceProvider, onClick: () -> Unit) {
 fun ProviderDetailsScreen(
     provider: ServiceProvider,
     viewModel: DaliliViewModel,
+    chats: List<ChatMessage>,
+    chatCustomerId: String,
+    settings: AppSettings,
     onBackToHome: () -> Unit
 ) {
     val context = LocalContext.current
@@ -887,103 +1087,232 @@ fun ProviderDetailsScreen(
     var showPremiumRequestDialog by remember { mutableStateOf(false) }
     var premiumPhoneConfig by remember { mutableStateOf("") }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-    ) {
-        Button(onClick = onBackToHome, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-            Text("🔙 العودة للقائمة")
-        }
-        Spacer(Modifier.height(16.dp))
+    var isDirectChatActive by remember { mutableStateOf(false) }
+    var chatMsgText by remember { mutableStateOf("") }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+    if (isDirectChatActive) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                // Large Avatar
-                if (provider.personalPhoto.isNotEmpty()) {
-                    AsyncImage(
-                        model = provider.personalPhoto,
-                        contentDescription = provider.name,
+                IconButton(onClick = { isDirectChatActive = false }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "تراجع")
+                }
+                Spacer(Modifier.width(8.dp))
+                Text("💬 محادثة مباشرة: ${provider.name}", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Divider()
+            Spacer(Modifier.height(8.dp))
+
+            if (!settings.isChatEnabled) {
+                // If chat is disabled by admin
+                Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Text(
+                            text = settings.chatDisabledMessage,
+                            modifier = Modifier.padding(16.dp),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            } else {
+                // Chat conversation is active
+                val roomMessages = chats.filter {
+                    (it.senderId == chatCustomerId && it.receiverId == provider.id) ||
+                    (it.senderId == provider.id && it.receiverId == chatCustomerId)
+                }
+
+                if (roomMessages.isEmpty()) {
+                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("أرسل رسالة لبدء دردشة فورية مع هذا المهني بخصوص الخدمة 🤝", color = Color.Gray, textAlign = TextAlign.Center, fontSize = 13.sp)
+                    }
+                } else {
+                    LazyColumn(
                         modifier = Modifier
-                            .size(120.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        reverseLayout = true
+                    ) {
+                        val reversed = roomMessages.reversed()
+                        items(reversed.size) { index ->
+                            val msg = reversed[index]
+                            val isMe = msg.senderId == chatCustomerId
+                            Box(
+                                modifier = Modifier.fillMaxWidth(),
+                                contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
+                            ) {
+                                Surface(
+                                    color = if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(msg.text, fontSize = 13.sp)
+                                        Text(
+                                            text = if (isMe) "أنت" else provider.name,
+                                            fontSize = 9.sp,
+                                            color = Color.Gray,
+                                            modifier = Modifier.align(Alignment.End)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = chatMsgText,
+                        onValueChange = { chatMsgText = it },
+                        placeholder = { Text("اكتب استفسارك هنا للفني...") },
+                        modifier = Modifier.weight(1f)
                     )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(120.dp)
-                            .background(Color.Gray, CircleShape),
-                        contentAlignment = Alignment.Center
+                    IconButton(
+                        onClick = {
+                            if (chatMsgText.isNotEmpty()) {
+                                val msg = ChatMessage(
+                                    senderId = chatCustomerId,
+                                    senderName = "عميل دليلي",
+                                    receiverId = provider.id,
+                                    receiverName = provider.name,
+                                    text = chatMsgText,
+                                    timestamp = System.currentTimeMillis()
+                                )
+                                viewModel.sendChatMessage(msg)
+                                chatMsgText = ""
+                            }
+                        }
                     ) {
-                        Text("👤", fontSize = 48.sp)
+                        Icon(Icons.Default.Send, contentDescription = "إرسال", tint = MaterialTheme.colorScheme.primary)
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(provider.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    if (provider.isVerified) {
-                        Spacer(Modifier.width(4.dp))
-                        Text("✔️", color = Color(0xFF1E88E5))
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Button(onClick = onBackToHome, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                Text("🔙 العودة للقائمة")
+            }
+            Spacer(Modifier.height(16.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Large Avatar
+                    if (provider.personalPhoto.isNotEmpty()) {
+                        AsyncImage(
+                            model = provider.personalPhoto,
+                            contentDescription = provider.name,
+                            modifier = Modifier
+                                .size(120.dp)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(120.dp)
+                                .background(Color.Gray, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("👤", fontSize = 48.sp)
+                        }
                     }
-                }
-                Text("${provider.categoryName} | ${provider.subCategoryName}", color = Color.LightGray)
+                    Spacer(Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(provider.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        if (provider.isVerified) {
+                            Spacer(Modifier.width(4.dp))
+                            Text("✔️", color = Color(0xFF1E88E5))
+                        }
+                    }
+                    Text("${provider.categoryName} | ${provider.subCategoryName}", color = Color.LightGray)
 
-                Spacer(Modifier.height(16.dp))
-                Divider()
-                Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Divider()
+                    Spacer(Modifier.height(16.dp))
 
-                Text("التواصل المباشر 📞", fontWeight = FontWeight.Bold)
-                Text("رقم الهاتف المهني: ${provider.phone}", fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                Text("العنوان والمنطقة: ${provider.region} - ${provider.address}")
+                    Text("التواصل المباشر 📞", fontWeight = FontWeight.Bold)
+                    Text("رقم الهاتف المهني: ${provider.phone}", fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(8.dp))
+                    Text("العنوان والمنطقة: ${provider.region} - ${provider.address}")
 
-                Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(24.dp))
 
-                // Premium subscription trigger
-                if (!provider.isPremium) {
+                    // Premium subscription trigger
+                    if (!provider.isPremium) {
+                        Button(
+                            onClick = { showPremiumRequestDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700))
+                        ) {
+                            Text("🥇 طلب شارة 'مميز' وترقية للبحث الأول", color = Color.Black)
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .background(Color(0xFFEAA611).copy(alpha = 0.2f))
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        ) {
+                            Text("👑 هذا الحساب مميز ومرخص حتى تاريخ نهاية الشهر الجاري", color = Color(0xFFFFD700))
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Action controls
                     Button(
-                        onClick = { showPremiumRequestDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700))
+                        onClick = {
+                            viewModel.recordServiceRequest(provider)
+                            Toast.makeText(context, "تم إبرام طلب الخدمة وتوثيق التواصل بنجاح!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("🥇 طلب شارة 'مميز' وترقية للبحث الأول", color = Color.Black)
+                        Text("💡 إبرام وبدء طلب خدمة جديد")
                     }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .background(Color(0xFFEAA611).copy(alpha = 0.2f))
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(8.dp))
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Direct chat initiation button
+                    Button(
+                        onClick = { isDirectChatActive = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("👑 هذا الحساب مميز ومرخص حتى تاريخ نهاية الشهر الجاري", color = Color(0xFFFFD700))
+                        Text("💬 بدء محادثة فورية مباشرة مع المهني")
                     }
-                }
 
-                Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                // Action controls
-                Button(
-                    onClick = {
-                        viewModel.recordServiceRequest(provider)
-                        Toast.makeText(context, "تم إبرام طلب الخدمة وتوثيق التواصل بنجاح!", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("💡 إبرام وبدء طلب خدمة جديد")
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                Button(
-                    onClick = { showReportDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("⚠️ الإبلاغ عن المحتوى أو هذا المقدّم")
+                    Button(
+                        onClick = { showReportDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("⚠️ الإبلاغ عن المحتوى أو هذا المقدّم")
+                    }
                 }
             }
         }
@@ -1363,15 +1692,25 @@ fun AdminGateScreen(
     savedPass: String,
     isRememberChecked: Boolean,
     isSavePwChecked: Boolean,
+    providersList: List<ServiceProvider>,
     onLoginSuccess: (AdminUser, Boolean, Boolean) -> Unit,
+    onProviderLoginSuccess: (ServiceProvider) -> Unit,
     onBack: () -> Unit,
     onUnauthorizedAttempt: (String) -> Unit
 ) {
     val context = LocalContext.current
+    var activeTab by remember { mutableStateOf("admin") } // admin or provider
+
+
+    // Admin states
     var usernameinput by remember { mutableStateOf(savedUser) }
     var passwordinput by remember { mutableStateOf(savedPass) }
     var rememberLogin by remember { mutableStateOf(isRememberChecked) }
     var savePassword by remember { mutableStateOf(isSavePwChecked) }
+
+    // Provider states
+    var providerPhoneInput by remember { mutableStateOf("") }
+    var providerNameInput by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -1381,80 +1720,139 @@ fun AdminGateScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("🛡️", fontSize = 72.sp)
+        Text("🔑", fontSize = 72.sp)
         Spacer(Modifier.height(12.dp))
-        Text("بوابة تسجيل الدخول المشرف", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("الولوج الآمن والمحمي للوحة التحكم والمشرفين", fontSize = 12.sp, color = Color.Gray)
-        Spacer(Modifier.height(24.dp))
+        Text("بوابة تسجيل الدخول دليلي", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("يرجى اختيار نوع الحساب لإتمام المصادقة والتحقق", fontSize = 12.sp, color = Color.Gray)
+        Spacer(Modifier.height(20.dp))
 
-        OutlinedTextField(
-            value = usernameinput,
-            onValueChange = { usernameinput = it },
-            label = { Text("اسم المستخدم") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = passwordinput,
-            onValueChange = { passwordinput = it },
-            label = { Text("كلمة المرور") },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // Saving controls checkbox
+        // TAB SELECTOR
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 20.dp),
+            horizontalArrangement = Arrangement.Center
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = rememberLogin, onCheckedChange = { rememberLogin = it })
-                Text("حفظ تسجيل الدخول", fontSize = 12.sp)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = savePassword, onCheckedChange = { savePassword = it })
-                Text("حفظ كلمة المرور", fontSize = 12.sp)
-            }
+            FilterChip(
+                selected = activeTab == "admin",
+                onClick = { activeTab = "admin" },
+                label = { Text("🛡️ مدير النظام") }
+            )
+            Spacer(Modifier.width(16.dp))
+            FilterChip(
+                selected = activeTab == "provider",
+                onClick = { activeTab = "provider" },
+                label = { Text("🛠️ مقدم خدمة / فني") }
+            )
         }
 
-        Spacer(Modifier.height(16.dp))
+        if (activeTab == "admin") {
+            // ADMIN LOGIN FORM
+            OutlinedTextField(
+                value = usernameinput,
+                onValueChange = { usernameinput = it },
+                label = { Text("اسم المستخدم للمسؤول") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(12.dp))
 
-        Button(
-            onClick = {
-                // Device model validation whitelist checks
-                val deviceModel = android.os.Build.MODEL ?: "Unknown Device Type"
-                val matchedDev = whitelistedDevices.find { it.deviceId == deviceModel }
-                
-                // Super bypass owner fallback
-                val ownerBypass = usernameinput == "WAM2026" && passwordinput == "maher736462"
-                
-                val adminMatched = adminsList.find { it.username == usernameinput && it.password == passwordinput }
-                
-                if (ownerBypass || adminMatched != null) {
-                    if (whitelistedDevices.isNotEmpty() && matchedDev == null && !ownerBypass) {
-                        Toast.makeText(context, "الوصول مرفوض! لم يتم ترخيص هذا الجهاز ($deviceModel) في whitelist.", Toast.LENGTH_LONG).show()
-                        onUnauthorizedAttempt("Model: $deviceModel | User: $usernameinput")
-                    } else {
-                        val adm = adminMatched ?: AdminUser("adm1", "WAM2026", "maher736462", "owner")
-                        onLoginSuccess(adm, rememberLogin, savePassword)
-                    }
-                } else {
-                    Toast.makeText(context, "عذراً! اسم المستخدم أو كلمة المرور غير صحيحة", Toast.LENGTH_SHORT).show()
-                    onUnauthorizedAttempt("فشل فك البوابة | Model: $deviceModel | User: $usernameinput")
+            OutlinedTextField(
+                value = passwordinput,
+                onValueChange = { passwordinput = it },
+                label = { Text("كلمة المرور") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // Saving controls checkbox
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = rememberLogin, onCheckedChange = { rememberLogin = it })
+                    Text("حفظ تسجيل الدخول", fontSize = 12.sp)
                 }
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("تسجيل الدخول الآمن")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = savePassword, onCheckedChange = { savePassword = it })
+                    Text("حفظ كلمة المرور", fontSize = 12.sp)
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    val deviceModel = android.os.Build.MODEL ?: "Unknown Device Type"
+                    val matchedDev = whitelistedDevices.find { it.deviceId == deviceModel }
+                    val ownerBypass = usernameinput == "WAM2026" && passwordinput == "maher736462"
+                    val adminMatched = adminsList.find { it.username == usernameinput && it.password == passwordinput }
+                    
+                    if (ownerBypass || adminMatched != null) {
+                        if (whitelistedDevices.isNotEmpty() && matchedDev == null && !ownerBypass) {
+                            Toast.makeText(context, "الوصول مرفوض! لم يتم ترخيص هذا الجهاز ($deviceModel) في whitelist.", Toast.LENGTH_LONG).show()
+                            onUnauthorizedAttempt("Model: $deviceModel | User: $usernameinput")
+                        } else {
+                            val adm = adminMatched ?: AdminUser("adm1", "WAM2026", "maher736462", "owner")
+                            onLoginSuccess(adm, rememberLogin, savePassword)
+                        }
+                    } else {
+                        Toast.makeText(context, "عذراً! اسم المستخدم أو كلمة المرور غير صحيحة", Toast.LENGTH_SHORT).show()
+                        onUnauthorizedAttempt("فشل البوابة | Model: $deviceModel | User: $usernameinput")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("تسجيل دخول المشرف 🛡️")
+            }
+        } else {
+            // PROVIDER LOGIN FORM
+            Text("دخول سريع لمزودي الخدمات ومتابعة المحادثات والرسائل", fontSize = 11.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = providerPhoneInput,
+                onValueChange = { providerPhoneInput = it },
+                label = { Text("رقم الهاتف المسجل (المطابق للملف)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = providerNameInput,
+                onValueChange = { providerNameInput = it },
+                label = { Text("الاسم المهني (اختياري للتحقق السريع)") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = {
+                    if (providerPhoneInput.isEmpty()) {
+                        Toast.makeText(context, "يرجى كتابة رقم الهاتف المسجل لتسجيل الدخول!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val trimmedPhone = providerPhoneInput.trim()
+                        val matched = providersList.find { it.phone.trim() == trimmedPhone || it.phone.trim().contains(trimmedPhone) }
+                        if (matched != null) {
+                            onProviderLoginSuccess(matched)
+                        } else {
+                            Toast.makeText(context, "عذراً! لم نجد أي فني أو مزود خدمة معتمد بالرقم $providerPhoneInput", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) {
+                Text("الدخول للوحة التحكم الفنية 🛠️")
+            }
         }
 
         Spacer(Modifier.height(12.dp))
 
         TextButton(onClick = onBack) {
-            Text("🔏 إلغاء والعودة للرئيسية")
+            Text("🔙 إلغاء والعودة للرئيسية")
         }
     }
 }
@@ -1476,6 +1874,7 @@ fun AdminDashboardParent(
     adminsList: List<AdminUser>,
     settings: AppSettings,
     logs: List<ActivityLog>,
+    chats: List<ChatMessage>,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1530,7 +1929,8 @@ fun AdminDashboardParent(
                 "admins_mgmt" to "🛡️ المشرفين",
                 "complaints" to "⚠️ الشكاوى والبلاغات",
                 "whitelist" to "🔒 الأجهزة الموثوقة",
-                "settings" to "⚙️ إعدادات هوية التطبيق"
+                "settings" to "⚙️ إعدادات هوية التطبيق",
+                "chats" to "💬 إدارة المحادثات"
             ).forEach { (tabId, label) ->
                 FilterChip(
                     selected = adminActiveTab == tabId,
@@ -1589,6 +1989,12 @@ fun AdminDashboardParent(
                 "settings" -> AdminSettingsConfigView(
                     settings = settings,
                     viewModel = viewModel
+                )
+                "chats" -> AdminChatsManagementView(
+                    chats = chats,
+                    providers = providers,
+                    viewModel = viewModel,
+                    settings = settings
                 )
             }
         }
@@ -1871,64 +2277,127 @@ fun AdminCategoriesManagementView(
     var subNameEn by remember { mutableStateOf("") }
     var targetCatForSub by remember { mutableStateOf<Category?>(null) }
 
+    // Dialog editing states
+    var editingCategory by remember { mutableStateOf<Category?>(null) }
+    var editingSubCategory by remember { mutableStateOf<SubCategory?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Main categories add block
+        // Main categories add block & management list
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("➕ إضافة قسم رئيسي جديد", fontWeight = FontWeight.Bold)
+                Text("📁 إدارة الأقسام والخدمات الرئيسية", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("أضف قسماً رئيسياً جديداً لمقدمي الخدمات لتسهيل العثور عليهم من قبل العملاء.", fontSize = 11.sp, color = Color.Gray)
+                
                 OutlinedTextField(
                     value = categoryNameAr,
                     onValueChange = { categoryNameAr = it },
-                    placeholder = { Text("اسم القسم بالعربية") }
+                    label = { Text("اسم القسم بالعربية") },
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = categoryNameEn,
                     onValueChange = { categoryNameEn = it },
-                    placeholder = { Text("اسم القسم بالإنجليزية") }
+                    label = { Text("اسم القسم بالإنجليزية") },
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = categoryImgUrl,
                     onValueChange = { categoryImgUrl = it },
-                    placeholder = { Text("رابط صورة أيقونة القسم") }
+                    label = { Text("رابط صورة أيقونة القسم") },
+                    modifier = Modifier.fillMaxWidth()
                 )
-                Button(onClick = {
-                    if (categoryNameAr.isNotEmpty()) {
-                        viewModel.addMainCategory(
-                            Category(nameAr = categoryNameAr, nameEn = categoryNameEn, imageUrl = categoryImgUrl)
-                        ) {
-                            Toast.makeText(context, "تمت إضافة التخصص والمهنة الرئيسية بنجاح!", Toast.LENGTH_SHORT).show()
-                            categoryNameAr = ""
-                            categoryNameEn = ""
-                            categoryImgUrl = ""
+                Button(
+                    onClick = {
+                        if (categoryNameAr.isNotEmpty()) {
+                            viewModel.addMainCategory(
+                                Category(nameAr = categoryNameAr, nameEn = categoryNameEn, imageUrl = categoryImgUrl)
+                            ) { success ->
+                                if (success) {
+                                    Toast.makeText(context, "تمت إضافة التخصص والمهنة الرئيسية بنجاح!", Toast.LENGTH_SHORT).show()
+                                    categoryNameAr = ""
+                                    categoryNameEn = ""
+                                    categoryImgUrl = ""
+                                } else {
+                                    Toast.makeText(context, "فشل إضافة القسم الرئسي", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("إضافة قسم رئيسي ➕")
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text("🗂️ الأقسام الرئيسية الحالية (${categories.size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                categories.forEach { cat ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(Color.Gray.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Text("📁 ", fontSize = 16.sp)
+                            Column {
+                                Text(cat.nameAr, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                if (cat.nameEn.isNotEmpty()) {
+                                    Text(cat.nameEn, fontSize = 11.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+                        Row {
+                            IconButton(onClick = { editingCategory = cat }) {
+                                Icon(Icons.Default.Edit, contentDescription = "تعديل", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(
+                                onClick = {
+                                    viewModel.deleteMainCategory(cat.id) { success ->
+                                        if (success) {
+                                            Toast.makeText(context, "تم حذف القسم الرئيسي بنجاح", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "حذف", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
-                }) {
-                    Text("إضافة قسم رئيسي")
                 }
             }
         }
 
-        // Sub categories manage
+        // Sub categories add block & management list
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("➕ إضافة تخصص وقسم فرعي مخصص للمهنيين", fontWeight = FontWeight.Bold)
+                Text("➕ إضافة تخصص وقسم فرعي مخصص للمهنيين", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 
                 var isMenuOpen by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(onClick = { isMenuOpen = true }) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { isMenuOpen = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text(targetCatForSub?.nameAr ?: "اختر القسم الرئيسي التابع له 📍")
                     }
                     DropdownMenu(expanded = isMenuOpen, onDismissRequest = { isMenuOpen = false }) {
                         categories.forEach { cat ->
-                            DropdownMenuItem(text = { Text(cat.nameAr) }, onClick = {
-                                targetCatForSub = cat
-                                isMenuOpen = false
-                            })
+                            DropdownMenuItem(
+                                text = { Text(cat.nameAr) },
+                                onClick = {
+                                    targetCatForSub = cat
+                                    isMenuOpen = false
+                                }
+                            )
                         }
                     }
                 }
@@ -1936,29 +2405,174 @@ fun AdminCategoriesManagementView(
                 OutlinedTextField(
                     value = subNameAr,
                     onValueChange = { subNameAr = it },
-                    placeholder = { Text("اسم القسم الفرعي بالعربية") }
+                    label = { Text("اسم القسم الفرعي بالعربية") },
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = subNameEn,
                     onValueChange = { subNameEn = it },
-                    placeholder = { Text("الأجنبي") }
+                    label = { Text("اسم القسم الفرعي بالإنجليزية") },
+                    modifier = Modifier.fillMaxWidth()
                 )
 
-                Button(onClick = {
-                    if (subNameAr.isNotEmpty() && targetCatForSub != null) {
-                        viewModel.addSubCategory(
-                            SubCategory(categoryId = targetCatForSub!!.id, nameAr = subNameAr, nameEn = subNameEn)
-                        ) {
-                            Toast.makeText(context, "تم ربط الجزء وتنزيل القسم الفرعي المخصص!", Toast.LENGTH_SHORT).show()
-                            subNameAr = ""
-                            subNameEn = ""
+                Button(
+                    onClick = {
+                        if (subNameAr.isNotEmpty() && targetCatForSub != null) {
+                            viewModel.addSubCategory(
+                                SubCategory(categoryId = targetCatForSub!!.id, nameAr = subNameAr, nameEn = subNameEn)
+                            ) { success ->
+                                if (success) {
+                                    Toast.makeText(context, "تم ربط الجزء وتنزيل القسم الفرعي المخصص!", Toast.LENGTH_SHORT).show()
+                                    subNameAr = ""
+                                    subNameEn = ""
+                                }
+                            }
+                        } else if (targetCatForSub == null) {
+                            Toast.makeText(context, "يرجى اختيار القسم الرئيسي أولاً!", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("إضافة قسم فرعي 🔗")
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                Text("📍 الخدمات الفرعية الحالية (${subCategories.size}):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                subCategories.forEach { sub ->
+                    val parentCat = categories.find { it.id == sub.categoryId }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(Color.Gray.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Text("📍 ", fontSize = 16.sp)
+                            Column {
+                                Text(sub.nameAr, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                Text("تابع لـ: ${parentCat?.nameAr ?: "قسم مجهول"}", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                        Row {
+                            IconButton(onClick = { editingSubCategory = sub }) {
+                                Icon(Icons.Default.Edit, contentDescription = "تعديل", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            }
+                            IconButton(
+                                onClick = {
+                                    viewModel.deleteSubCategory(sub.id) { success ->
+                                        if (success) {
+                                            Toast.makeText(context, "تم حذف القسم الفرعي بنجاح", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "حذف", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+                            }
                         }
                     }
-                }) {
-                    Text("إضافة قسم فرعي")
                 }
             }
         }
+    }
+
+    // Modal dialog for category editing
+    editingCategory?.let { cat ->
+        var editNameAr by remember { mutableStateOf(cat.nameAr) }
+        var editNameEn by remember { mutableStateOf(cat.nameEn) }
+        var editImgUrl by remember { mutableStateOf(cat.imageUrl) }
+
+        AlertDialog(
+            onDismissRequest = { editingCategory = null },
+            title = { Text("📝 تعديل بيانات القسم الرئيسي") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = editNameAr, onValueChange = { editNameAr = it }, label = { Text("الاسم بالعربية") })
+                    OutlinedTextField(value = editNameEn, onValueChange = { editNameEn = it }, label = { Text("الاسم بالإنجليزية") })
+                    OutlinedTextField(value = editImgUrl, onValueChange = { editImgUrl = it }, label = { Text("رابط الصورة الفيرستورية") })
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editNameAr.isNotEmpty()) {
+                        val updated = cat.copy(nameAr = editNameAr, nameEn = editNameEn, imageUrl = editImgUrl)
+                        viewModel.updateMainCategory(updated) { success ->
+                            if (success) {
+                                Toast.makeText(context, "تم تحديث القسم في Firestore ونشره فورياً!", Toast.LENGTH_SHORT).show()
+                                editingCategory = null
+                            }
+                        }
+                    }
+                }) {
+                    Text("حفظ التعديلات")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingCategory = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+
+    // Modal dialog for subcategory editing
+    editingSubCategory?.let { sub ->
+        var editSubNameAr by remember { mutableStateOf(sub.nameAr) }
+        var editSubNameEn by remember { mutableStateOf(sub.nameEn) }
+        var selectedParentId by remember { mutableStateOf(sub.categoryId) }
+        var isEditMenuOpen by remember { mutableStateOf(false) }
+
+        val activeParent = categories.find { it.id == selectedParentId }
+
+        AlertDialog(
+            onDismissRequest = { editingSubCategory = null },
+            title = { Text("📝 تعديل القسم الفرعي") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { isEditMenuOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("التابع لـ: ${activeParent?.nameAr ?: "اختر..."}")
+                        }
+                        DropdownMenu(expanded = isEditMenuOpen, onDismissRequest = { isEditMenuOpen = false }) {
+                            categories.forEach { cat ->
+                                DropdownMenuItem(
+                                    text = { Text(cat.nameAr) },
+                                    onClick = {
+                                        selectedParentId = cat.id
+                                        isEditMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(value = editSubNameAr, onValueChange = { editSubNameAr = it }, label = { Text("الاسم بالعربية") })
+                    OutlinedTextField(value = editSubNameEn, onValueChange = { editSubNameEn = it }, label = { Text("الاسم بالإنجليزية") })
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editSubNameAr.isNotEmpty()) {
+                        val updatedSub = sub.copy(categoryId = selectedParentId, nameAr = editSubNameAr, nameEn = editSubNameEn)
+                        viewModel.updateSubCategory(updatedSub) { success ->
+                            if (success) {
+                                Toast.makeText(context, "تم التعديل ومزامنة التغييرات الفرعية!", Toast.LENGTH_SHORT).show()
+                                editingSubCategory = null
+                            }
+                        }
+                    }
+                }) {
+                    Text("حفظ التعديلات")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingSubCategory = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }
 
@@ -2447,6 +3061,7 @@ fun AdminSettingsConfigView(
 ) {
     val context = LocalContext.current
     var appNameAr by remember { mutableStateOf(settings.appNameAr) }
+    var appNameEn by remember { mutableStateOf(settings.appNameEn) }
     var footerText by remember { mutableStateOf(settings.promoFooterText) }
     var supportPhone by remember { mutableStateOf(settings.supportPhone) }
     var supportEmail by remember { mutableStateOf(settings.supportEmail) }
@@ -2463,6 +3078,17 @@ fun AdminSettingsConfigView(
     var assistantSize by remember { mutableStateOf(settings.assistantSize) }
     var assistantIconUrl by remember { mutableStateOf(settings.assistantIconUrl) }
 
+    // Chat and Global Styling configurations
+    var topBarIconOrder by remember { mutableStateOf(settings.topBarIconOrder) }
+    var isChatEnabled by remember { mutableStateOf(settings.isChatEnabled) }
+    var chatIconSize by remember { mutableStateOf(settings.chatIconSize) }
+    var chatIconColor by remember { mutableStateOf(settings.chatIconColor) }
+    var chatVisibility by remember { mutableStateOf(settings.chatVisibility) }
+    var chatDisabledMessage by remember { mutableStateOf(settings.chatDisabledMessage) }
+    var globalTextSize by remember { mutableStateOf(settings.globalTextSize) }
+    var globalTextColor by remember { mutableStateOf(settings.globalTextColor) }
+    var globalFontFamily by remember { mutableStateOf(settings.globalFontFamily) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2473,8 +3099,10 @@ fun AdminSettingsConfigView(
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("🎨 إعدادات مظهر وهوية دليلي العام", fontWeight = FontWeight.Bold)
                 
-                OutlinedTextField(value = appNameAr, onValueChange = { appNameAr = it }, label = { Text("اسم التطبيق الرئيسي") })
+                OutlinedTextField(value = appNameAr, onValueChange = { appNameAr = it }, label = { Text("اسم التطبيق الرئيسي (عربي)") })
+                OutlinedTextField(value = appNameEn, onValueChange = { appNameEn = it }, label = { Text("اسم التطبيق الفرعي (English)") })
                 OutlinedTextField(value = footerText, onValueChange = { footerText = it }, label = { Text("تذييل وترويج الصفحات (Footer Text)") })
+                OutlinedTextField(value = topBarIconOrder, onValueChange = { topBarIconOrder = it }, label = { Text("ترتيب أيقونات الشريط العلوي (مفصولة بفاصلة: home,login,register,lang,refresh)") })
 
                 Divider()
 
@@ -2523,6 +3151,35 @@ fun AdminSettingsConfigView(
 
                 Divider()
 
+                Text("💬 تخصيص نظام المحادثة الفورية (Real-time Chat)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = isChatEnabled, onCheckedChange = { isChatEnabled = it })
+                    Text("تشغيل نظام المحادثة للجميع", fontSize = 12.sp)
+                }
+                OutlinedTextField(value = chatDisabledMessage, onValueChange = { chatDisabledMessage = it }, label = { Text("الرسالة المخصصة عند تعطيل الدردشة") })
+                OutlinedTextField(value = chatIconColor, onValueChange = { chatIconColor = it }, label = { Text("لون أيقونة الدردشة (Hex مثل 1E88E5#)") })
+                OutlinedTextField(value = chatIconSize.toString(), onValueChange = { chatIconSize = it.toIntOrNull() ?: 28 }, label = { Text("حجم أيقونة الدردشة (الافتراضي 28)") })
+                
+                Text("ظهور أيقونة الدردشة مؤقتاً:")
+                Row {
+                    listOf("visible" to "مرئية للجميع 👁️", "hidden" to "مخفية مؤقتاً 🙈", "deleted" to "محذوفة نهائياً ❌").forEach { (v, label) ->
+                        FilterChip(
+                            selected = chatVisibility == v,
+                            onClick = { chatVisibility = v },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+
+                Divider()
+                
+                Text("✍️ خيارات الخطوط والنصوص العامة", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                OutlinedTextField(value = globalTextSize.toString(), onValueChange = { globalTextSize = it.toIntOrNull() ?: 16 }, label = { Text("حجم الخط العام") })
+                OutlinedTextField(value = globalTextColor, onValueChange = { globalTextColor = it }, label = { Text("لون النصوص العامة (Hex)") })
+                OutlinedTextField(value = globalFontFamily, onValueChange = { globalFontFamily = it }, label = { Text("نوع الخط العام") })
+
+                Divider()
+
                 // Maintenance Switch
                 Row(
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2545,6 +3202,7 @@ fun AdminSettingsConfigView(
                 Button(onClick = {
                     val freshS = AppSettings(
                         appNameAr = appNameAr,
+                        appNameEn = appNameEn,
                         promoFooterText = footerText,
                         supportPhone = supportPhone,
                         supportEmail = supportEmail,
@@ -2556,7 +3214,16 @@ fun AdminSettingsConfigView(
                         maintenanceMessage = maintenanceMessage,
                         assistantEnabled = assistantEnabled,
                         assistantSize = assistantSize,
-                        assistantIconUrl = assistantIconUrl
+                        assistantIconUrl = assistantIconUrl,
+                        topBarIconOrder = topBarIconOrder,
+                        isChatEnabled = isChatEnabled,
+                        chatIconSize = chatIconSize,
+                        chatIconColor = chatIconColor,
+                        chatVisibility = chatVisibility,
+                        chatDisabledMessage = chatDisabledMessage,
+                        globalTextSize = globalTextSize,
+                        globalTextColor = globalTextColor,
+                        globalFontFamily = globalFontFamily
                     )
                     viewModel.updateSettings(freshS) { success ->
                         if (success) {
@@ -2570,3 +3237,445 @@ fun AdminSettingsConfigView(
         }
     }
 }
+
+// ---------------- SECRET BACKDOOR SCREEN ----------------
+
+@Composable
+fun SecretBackdoorScreen(
+    settings: AppSettings,
+    viewModel: DaliliViewModel,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    var inputPasscode by remember { mutableStateOf("") }
+    var isUnlocked by remember { mutableStateOf(false) }
+
+    // Backup local parameters
+    var appNameAr by remember { mutableStateOf(settings.appNameAr) }
+    var appNameEn by remember { mutableStateOf(settings.appNameEn) }
+    var pColor by remember { mutableStateOf(settings.primaryColor) }
+    var sColor by remember { mutableStateOf(settings.secondaryColor) }
+    var footerText by remember { mutableStateOf(settings.promoFooterText) }
+    var globalTextSize by remember { mutableStateOf(settings.globalTextSize) }
+    var supportPhone by remember { mutableStateOf(settings.supportPhone) }
+    var supportEmail by remember { mutableStateOf(settings.supportEmail) }
+    var supportWhatsapp by remember { mutableStateOf(settings.supportWhatsapp) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        if (!isUnlocked) {
+            Text("🔒", fontSize = 72.sp)
+            Spacer(Modifier.height(12.dp))
+            Text("البوابة الملكية الخلفية للتحكم بالبنية", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("صلاحية مطلقة مالك التطبيق الرئيسي لترميم المنظومة", fontSize = 12.sp, color = Color.Gray)
+            
+            Spacer(Modifier.height(24.dp))
+            OutlinedTextField(
+                value = inputPasscode,
+                onValueChange = { inputPasscode = it },
+                label = { Text("أدخل رمز المرور السري للمالك") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    if (inputPasscode == "maher--736462") {
+                        isUnlocked = true
+                    } else {
+                        Toast.makeText(context, "رمز المرور خاطئ! يرجى الاستعانة بمالك المنصة الرئيسي.", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("المصادقة وفك الحجب 🔓")
+            }
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = onBack) {
+                Text("رجوع للرئيسية")
+            }
+        } else {
+            // UNLOCKED BACKDOOR CONTROLS
+            Text("🛠️ البوابة السرية (للمالك فقط)", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(20.dp))
+
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("⚙️ محتويات الإعدادات السرية للمنظومة", fontWeight = FontWeight.Bold)
+
+                    OutlinedTextField(value = appNameAr, onValueChange = { appNameAr = it }, label = { Text("تعديل اسم التطبيق (عربي)") })
+                    OutlinedTextField(value = appNameEn, onValueChange = { appNameEn = it }, label = { Text("تعديل اسم التطبيق (إنجليزي)") })
+                    OutlinedTextField(value = pColor, onValueChange = { pColor = it }, label = { Text("اللون الأساسي للعلامة (#Hex)") })
+                    OutlinedTextField(value = sColor, onValueChange = { sColor = it }, label = { Text("اللون الثانوي والترهيني (#Hex)") })
+                    OutlinedTextField(value = footerText, onValueChange = { footerText = it }, label = { Text("التذييل الدعائي المتحرك والتروجي") })
+                    OutlinedTextField(value = globalTextSize.toString(), onValueChange = { globalTextSize = it.toIntOrNull() ?: 16 }, label = { Text("حجم خط التذييل العريض") })
+                    OutlinedTextField(value = supportPhone, onValueChange = { supportPhone = it }, label = { Text("هاتف الدعم المعتمد للمالك") })
+                    OutlinedTextField(value = supportWhatsapp, onValueChange = { supportWhatsapp = it }, label = { Text("واتساب المطور الرسمي للدعم") })
+                    OutlinedTextField(value = supportEmail, onValueChange = { supportEmail = it }, label = { Text("البريد الإلكتروني للدعم التقني") })
+
+                    Button(
+                        onClick = {
+                            val nextS = settings.copy(
+                                appNameAr = appNameAr,
+                                appNameEn = appNameEn,
+                                primaryColor = pColor,
+                                secondaryColor = sColor,
+                                promoFooterText = footerText,
+                                globalTextSize = globalTextSize,
+                                supportPhone = supportPhone,
+                                supportWhatsapp = supportWhatsapp,
+                                supportEmail = supportEmail
+                            )
+                            viewModel.updateSettings(nextS) { ok ->
+                                if (ok) {
+                                    Toast.makeText(context, "تم ترحيل وحفظ التعديلات السرية فورياً!", Toast.LENGTH_SHORT).show()
+                                    onBack()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("مزامنة وحفظ الطوارئ الفورية ⚡")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onBack, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)) {
+                Text("إغلاق والعودة للرئيسية")
+            }
+        }
+    }
+}
+
+// ---------------- PROVIDER WORKSPACE DASHBOARD SCREEN ----------------
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ProviderDashboardScreen(
+    provider: ServiceProvider,
+    chats: List<ChatMessage>,
+    viewModel: DaliliViewModel,
+    onLogout: () -> Unit
+) {
+    val context = LocalContext.current
+    var replyText by remember { mutableStateOf("") }
+    
+    // Group chats by unique client identifier (sender name + phone)
+    val groupedChats = chats.filter { 
+        it.receiverId == provider.id || it.senderId == provider.id
+    }.groupBy { 
+        if (it.senderId == provider.id) it.receiverId else it.senderId 
+    }
+
+    var selectedRoomId by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Top
+    ) {
+        // HEADER
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("لوحة التحكم الفنية والخدمية 🛠️", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("مرحباً بك: ${provider.name}", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+            }
+            Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                Text("خروج 🚪", fontSize = 11.sp)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        if (selectedRoomId == null) {
+            // LIST ACTIVE ROOMS
+            Text("💬 المحادثات النشطة الواردة من الزبائن:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(Modifier.height(10.dp))
+
+            if (groupedChats.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("لا توجد أي رسائل أو محادثات نشطة حالياً مع هذا الرقم المهني.", color = Color.Gray, textAlign = TextAlign.Center)
+                }
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val entries = groupedChats.entries.toList()
+                    items(entries.size) { index ->
+                        val entry = entries[index]
+                        val senderKey = entry.key
+                        val messagesList = entry.value
+                        val lastMsg = messagesList.lastOrNull()
+                        Card(
+                            onClick = { selectedRoomId = senderKey },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    Text("عميل طالب خدمات 👤", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("${messagesList.size} رسائل", fontSize = 11.sp, color = Color.Gray)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = lastMsg?.text ?: "لا توجد رسالة",
+                                    fontSize = 12.sp,
+                                    color = Color.DarkGray,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // INTERMEDIARY ROOM DETAILED CHAT VIEW
+            val roomMessages = groupedChats[selectedRoomId] ?: emptyList()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { selectedRoomId = null }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "رجوع")
+                }
+                Text("محادثة الزبون السريعة المباشرة", fontWeight = FontWeight.Bold)
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // reverse list to read starting top latest bottom
+                val reversedList = roomMessages.reversed()
+                items(reversedList.size) { index ->
+                    val msg = reversedList[index]
+                    val isMe = msg.senderId == provider.id
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
+                    ) {
+                        Surface(
+                            color = if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.widthIn(max = 280.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(msg.text, fontSize = 13.sp)
+                                Text(
+                                    text = if (isMe) "أنت" else "الزبون",
+                                    fontSize = 9.sp,
+                                    color = Color.Gray,
+                                    modifier = Modifier.align(Alignment.End)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // RECOGNIZED WRITING FIELD
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = replyText,
+                    onValueChange = { replyText = it },
+                    placeholder = { Text("اكتب ردك للزبون المباشر...") },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = {
+                        if (replyText.isNotEmpty()) {
+                            val newMsg = ChatMessage(
+                                senderId = provider.id,
+                                senderName = provider.name,
+                                receiverId = selectedRoomId ?: "",
+                                receiverName = "الزبون",
+                                text = replyText,
+                                timestamp = System.currentTimeMillis()
+                            )
+                            viewModel.sendChatMessage(newMsg)
+                            replyText = ""
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "إرسال الرد", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
+// ---------------- ADMIN CENTRAL CHATS MANAGEMENT SCREEN ----------------
+
+@Composable
+fun AdminChatsManagementView(
+    chats: List<ChatMessage>,
+    providers: List<ServiceProvider>,
+    viewModel: DaliliViewModel,
+    settings: AppSettings
+) {
+    val context = LocalContext.current
+    var selectedChatRoom by remember { mutableStateOf<String?>(null) }
+    var superAdminReply by remember { mutableStateOf("") }
+
+    // Grouping chats by roomId
+    val chatRooms = chats.groupBy { 
+        if (it.senderId.startsWith("customer_") || it.receiverId.startsWith("customer_")) {
+            // customers
+            if (it.senderId.startsWith("customer_")) it.senderId else it.receiverId
+        } else {
+            it.senderId
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("💬 مراقبة وإدارة محادثات العملاء والفنيين", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // CSV export
+                Button(
+                    onClick = {
+                        val csv = StringBuilder("ID,Sender,Receiver,Message,Timestamp\n")
+                        chats.forEach {
+                            csv.append("\"${it.id}\",\"${it.senderName}\",\"${it.receiverName}\",\"${it.text}\",\"${it.timestamp}\"\n")
+                        }
+                        val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboardManager.setPrimaryClip(ClipData.newPlainText("Chats CSV", csv.toString()))
+                        Toast.makeText(context, "تم توليد وتصدير ملف CSV ونسخه للحافظة بنجاح!", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                ) {
+                    Text("تصدير CSV 📋", fontSize = 10.sp)
+                }
+
+                // Delete system logs
+                Button(
+                    onClick = {
+                        viewModel.clearAllChats { ok ->
+                            if (ok) {
+                                Toast.makeText(context, "تم مسح كافة سجلات الدردشة نهائياً من Firestore ⚠️", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("مسح السجل 🗑️", fontSize = 10.sp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        if (selectedChatRoom == null) {
+            // List active rooms
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val roomsKeys = chatRooms.keys.toList()
+                items(roomsKeys.size) { i ->
+                    val roomKey = roomsKeys[i]
+                    val msgs = chatRooms[roomKey] ?: emptyList()
+                    val lastMsg = msgs.lastOrNull()
+                    Card(
+                        onClick = { selectedChatRoom = roomKey },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                Text("محادثة العميل: ${lastMsg?.senderName ?: "زائر"}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("${msgs.size} رسائل", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Text("معرّف المرسل: ${lastMsg?.senderId ?: "فارغ"}", fontSize = 11.sp, color = Color.Gray)
+                            Spacer(Modifier.height(4.dp))
+                            Text("آخر رسالة: ${lastMsg?.text ?: "لا رسائل"}", fontSize = 11.sp, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        } else {
+            // Room Detailed view inside control
+            val msgs = chatRooms[selectedChatRoom] ?: emptyList()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = { selectedChatRoom = null }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "تراجع")
+                }
+                Text("تفاصيل غرفة: ${selectedChatRoom}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                items(msgs.size) { index ->
+                    val msg = msgs[index]
+                    val isMeAdmin = msg.senderId == "super_admin_maher"
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = if (isMeAdmin) Alignment.CenterEnd else Alignment.CenterStart) {
+                        Surface(
+                            color = if (isMeAdmin) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.widthIn(max = 300.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(msg.text, fontSize = 12.sp)
+                                Text("مرسل: ${msg.senderName} (ID: ${msg.senderId})", fontSize = 10.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // Administrator reply channel
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = superAdminReply,
+                    onValueChange = { superAdminReply = it },
+                    placeholder = { Text("الرد كمشرف رئيسي (Super Admin Reply)...") },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = {
+                        if (superAdminReply.isNotEmpty()) {
+                            val msg = ChatMessage(
+                                senderId = "super_admin_maher",
+                                senderName = "الأدمن الرئيسي ماهر",
+                                receiverId = selectedChatRoom ?: "",
+                                receiverName = "العميل",
+                                text = superAdminReply,
+                                timestamp = System.currentTimeMillis()
+                            )
+                            viewModel.sendChatMessage(msg)
+                            superAdminReply = ""
+                        }
+                    }
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "ارسل كمشرف", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
