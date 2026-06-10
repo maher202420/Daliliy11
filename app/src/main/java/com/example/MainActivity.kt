@@ -765,8 +765,11 @@ fun HomeScreen(
         val matchesSearch = if (qNorm.isEmpty()) true else {
             arabicNormalizer(prov.name).contains(qNorm) ||
             arabicNormalizer(prov.address).contains(qNorm) ||
+            arabicNormalizer(prov.region).contains(qNorm) ||
             arabicNormalizer(prov.categoryName).contains(qNorm) ||
-            arabicNormalizer(prov.subCategoryName).contains(qNorm)
+            arabicNormalizer(prov.subCategoryName).contains(qNorm) ||
+            prov.inspectionCost.contains(searchQuery) ||
+            prov.inspectionCost.contains(qNorm)
         }
         val notBlocked = !prov.isBlocked
         
@@ -799,6 +802,12 @@ fun HomeScreen(
             onValueChange = { searchQuery = it },
             placeholder = { Text("ابحث صوتياً أو كتابياً في دليلي...") },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث") },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            ),
             trailingIcon = {
                 IconButton(onClick = {
                     try {
@@ -1450,8 +1459,29 @@ fun AboutScreen(settings: AppSettings) {
     ) {
         Spacer(Modifier.height(20.dp))
         
-        // App Custom Logo / Icon if set
-        if (settings.logoUrl.isNotEmpty()) {
+        // App Custom Logo / Icon / Custom Cover
+        if (settings.aboutCoverType == "image" && settings.aboutCoverUrl.isNotEmpty()) {
+            AsyncImage(
+                model = settings.aboutCoverUrl,
+                contentDescription = "شعار وغلاف التطبيق المخصص",
+                modifier = Modifier
+                    .size(110.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else if (settings.aboutCoverType == "text" && settings.aboutCoverText.isNotEmpty()) {
+            Surface(
+                modifier = Modifier.size(110.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 8.dp
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(6.dp)) {
+                    Text(settings.aboutCoverText, fontSize = if (settings.aboutCoverText.length > 3) 22.sp else 42.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                }
+            }
+        } else if (settings.logoUrl.isNotEmpty()) {
             AsyncImage(
                 model = settings.logoUrl,
                 contentDescription = "شعار التطبيق",
@@ -1621,7 +1651,7 @@ fun AboutScreen(settings: AppSettings) {
         Button(
             onClick = {
                 try {
-                    val shareText = "تطبيق ${settings.appNameAr}: دليلك الشامل لجميع المهن المقاولاتية والخدمية والتقنية في اليمن!\nالدعم والاتصال المباشر: ${settings.supportPhone}\nحمل التطبيق الآن واستمتع مع أفضل مزودي الخدمات المعتمدين والموثوقين."
+                    val shareText = "تطبيق ${settings.appNameAr}: دليلك الشامل لجميع المهن المقاولاتية والخدمية والتقنية في اليمن!\nالدعم والاتصال المباشر: ${settings.supportPhone}\nرابط تحميل ومشاركة التطبيق الرسمي: ${settings.appSharingLink}"
                     val sendIntent: Intent = Intent().apply {
                         action = Intent.ACTION_SEND
                         putExtra(Intent.EXTRA_TEXT, shareText)
@@ -1952,6 +1982,12 @@ fun AdminGateScreen(
                 value = usernameinput,
                 onValueChange = { usernameinput = it },
                 label = { Text("اسم المستخدم للمسؤول") },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(12.dp))
@@ -1961,6 +1997,12 @@ fun AdminGateScreen(
                 onValueChange = { passwordinput = it },
                 label = { Text("كلمة المرور") },
                 visualTransformation = PasswordVisualTransformation(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(12.dp))
@@ -2016,6 +2058,12 @@ fun AdminGateScreen(
                 value = providerPhoneInput,
                 onValueChange = { providerPhoneInput = it },
                 label = { Text("رقم الهاتف المسجل (المطابق للملف)") },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(12.dp))
@@ -2024,6 +2072,12 @@ fun AdminGateScreen(
                 value = providerNameInput,
                 onValueChange = { providerNameInput = it },
                 label = { Text("الاسم المهني (اختياري للتحقق السريع)") },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                ),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(Modifier.height(16.dp))
@@ -3164,6 +3218,7 @@ fun AdminSupervisorsManagementView(
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var adminRole by remember { mutableStateOf("admin") }
+    var editingAdminId by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -3180,7 +3235,7 @@ fun AdminSupervisorsManagementView(
         } else {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("➕ تعيين مشرف وباب دخول خلفي جديد", fontWeight = FontWeight.Bold)
+                    Text(if (editingAdminId != null) "📝 تعديل بيانات المشرف الحالية" else "➕ تعيين مشرف وباب دخول خلفي جديد", fontWeight = FontWeight.Bold)
                     OutlinedTextField(value = username, onValueChange = { username = it }, placeholder = { Text("اسم مستخدم المشرف") })
                     OutlinedTextField(value = password, onValueChange = { password = it }, placeholder = { Text("رمز الدخول السري") })
                     
@@ -3195,16 +3250,45 @@ fun AdminSupervisorsManagementView(
                         }
                     }
 
-                    Button(onClick = {
-                        if (username.isNotEmpty() && password.isNotEmpty()) {
-                            viewModel.addAdminUser(AdminUser(username = username, password = password, role = adminRole)) {
-                                Toast.makeText(context, "تم ترقية المستخدم للائحة المشرفين الدائمين!", Toast.LENGTH_SHORT).show()
-                                username = ""
-                                password = ""
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                if (username.isNotEmpty() && password.isNotEmpty()) {
+                                    val finalId = editingAdminId ?: ("adm_" + System.currentTimeMillis())
+                                    val userToUpdate = AdminUser(id = finalId, username = username.trim(), password = password.trim(), role = adminRole)
+                                    viewModel.updateAdminUser(userToUpdate) { success ->
+                                        if (success) {
+                                            if (editingAdminId != null) {
+                                                Toast.makeText(context, "تم تعديل وحفظ بيانات المشرف سحابياً! 💾", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "تم إضافة وترقية المشرف الجديد بنجاح! 🎉", Toast.LENGTH_SHORT).show()
+                                            }
+                                            username = ""
+                                            password = ""
+                                            editingAdminId = null
+                                        }
+                                    }
+                                } else {
+                                    Toast.makeText(context, "يرجى ملء جميع الحقول أولاً!", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (editingAdminId != null) "تحديث وحفظ التعديلات 💾" else "إضافة مشرف لخدمتكم ➕")
+                        }
+                        
+                        if (editingAdminId != null) {
+                            Button(
+                                onClick = {
+                                    username = ""
+                                    password = ""
+                                    editingAdminId = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("إلغاء ❌")
                             }
                         }
-                    }) {
-                        Text("إضافة مشرف لخدمتكم")
                     }
                 }
             }
@@ -3220,11 +3304,22 @@ fun AdminSupervisorsManagementView(
                 ) {
                     Column {
                         Text(adm.username, fontWeight = FontWeight.Bold)
-                        Text("الدور: ${adm.role}", fontSize = 11.sp, color = Color.Gray)
+                        Text("الدور وصلاحيات المشرف: ${adm.role}", fontSize = 11.sp, color = Color.Gray)
+                        Text("رمز المرور: ${adm.password}", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
                     }
                     if (role == "owner") {
-                        IconButton(onClick = { viewModel.removeAdminUser(adm.id) }) {
-                            Icon(Icons.Default.Delete, contentDescription = "حذف مشرف", tint = Color.Red)
+                        Row {
+                            IconButton(onClick = {
+                                editingAdminId = adm.id
+                                username = adm.username
+                                password = adm.password
+                                adminRole = adm.role
+                            }) {
+                                Icon(Icons.Default.Edit, contentDescription = "تعديل بيانات المشرف", tint = MaterialTheme.colorScheme.secondary)
+                            }
+                            IconButton(onClick = { viewModel.removeAdminUser(adm.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "حذف مشرف", tint = Color.Red)
+                            }
                         }
                     }
                 }
@@ -3358,6 +3453,21 @@ fun AdminSettingsConfigView(
     var primaryColor by remember { mutableStateOf(settings.primaryColor) }
     var secondaryColor by remember { mutableStateOf(settings.secondaryColor) }
     
+    // About Page Customize states
+    var appSharingLink by remember { mutableStateOf(settings.appSharingLink) }
+    var aboutCoverUrl by remember { mutableStateOf(settings.aboutCoverUrl) }
+    var aboutCoverText by remember { mutableStateOf(settings.aboutCoverText) }
+    var aboutCoverType by remember { mutableStateOf(settings.aboutCoverType) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            aboutCoverUrl = uri.toString()
+            aboutCoverType = "image"
+        }
+    }
+    
     var themeChoice by remember { mutableStateOf(settings.themeChoice) }
     var isMaintenanceMode by remember { mutableStateOf(settings.isMaintenanceMode) }
     var maintenanceMessage by remember { mutableStateOf(settings.maintenanceMessage) }
@@ -3416,6 +3526,41 @@ fun AdminSettingsConfigView(
                 OutlinedTextField(value = supportPhone, onValueChange = { supportPhone = it }, label = { Text("هاتف الدعم الفني") })
                 OutlinedTextField(value = supportWhatsapp, onValueChange = { supportWhatsapp = it }, label = { Text("رقم واتساب المعتمد") })
                 OutlinedTextField(value = supportEmail, onValueChange = { supportEmail = it }, label = { Text("إيميل مراسلات المطور") })
+                OutlinedTextField(value = appSharingLink, onValueChange = { appSharingLink = it }, label = { Text("رابط مشاركة وتحميل التطبيق") })
+                
+                Text("تخصيص صورة وغلاف صفحة (عن دليلي):", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("image" to "عرض صورة 🖼️", "text" to "عرض نص/إيموجي ✍️").forEach { (type, label) ->
+                        FilterChip(
+                            selected = aboutCoverType == type,
+                            onClick = { aboutCoverType = type },
+                            label = { Text(label) }
+                        )
+                    }
+                }
+                
+                if (aboutCoverType == "image") {
+                    Button(
+                        onClick = { galleryLauncher.launch("image/*") },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Text("📁 اختر صورة الغلاف من الذاكرة (الاستوديو)")
+                    }
+                    if (aboutCoverUrl.startsWith("content://")) {
+                        Text("تم اختيار صورة محلية بنجاح! ✔️", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                    }
+                    OutlinedTextField(
+                        value = aboutCoverUrl,
+                        onValueChange = { aboutCoverUrl = it },
+                        label = { Text("أو الصق رابط صورة الغلاف مباشر من النت") }
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = aboutCoverText,
+                        onValueChange = { aboutCoverText = it },
+                        label = { Text("اكتب نص أو إيموجي الغلاف بدلاً من الصورة") }
+                    )
+                }
 
                 Divider()
 
@@ -3512,7 +3657,11 @@ fun AdminSettingsConfigView(
                         chatDisabledMessage = chatDisabledMessage,
                         globalTextSize = globalTextSize,
                         globalTextColor = globalTextColor,
-                        globalFontFamily = globalFontFamily
+                        globalFontFamily = globalFontFamily,
+                        appSharingLink = appSharingLink,
+                        aboutCoverUrl = aboutCoverUrl,
+                        aboutCoverText = aboutCoverText,
+                        aboutCoverType = aboutCoverType
                     )
                     viewModel.updateSettings(freshS) { success ->
                         if (success) {
@@ -3602,6 +3751,7 @@ fun SecretBackdoorScreen(
     var p3 by remember { mutableStateOf(true) } // registration_requests
     var p4 by remember { mutableStateOf(true) } // backup_restore
     var p5 by remember { mutableStateOf(true) } // general_config
+    var editingBackdoorSuperId by remember { mutableStateOf<String?>(null) }
     
     // Clean-up params
     var cleanDaysOption by remember { mutableStateOf(30) } // 7, 30, 90 days
@@ -4093,7 +4243,7 @@ fun SecretBackdoorScreen(
                     // SUPERVISOR AND REGISTERED COMPLAINTS LOGS TAB
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("👮 إدارة وتعيين المشرفين والمساعدين مع الصلاحيات الخمس", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(if (editingBackdoorSuperId != null) "📝 تعديل بيانات وصلاحيات المشرف المساعد" else "👮 إدارة وتعيين المشرفين والمساعدين مع الصلاحيات الخمس", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             Text("تسمح هذه البوابة المخصصة للمالك فقط بصياغة وضبط أدمن النظام المساعدين مع تخصيص المربعات الخمس للصلاحيات العريضة بالمنظومة.", fontSize = 11.sp, color = Color.Gray)
                             
                             OutlinedTextField(value = newSuperUsername, onValueChange = { newSuperUsername = it }, label = { Text("اسم مستخدم المشرف") }, modifier = Modifier.fillMaxWidth())
@@ -4122,37 +4272,60 @@ fun SecretBackdoorScreen(
                                 Text("إدارة الضوابط العامة والإعدادات وشكل التطبيق", fontSize = 11.sp)
                             }
                             
-                            Button(
-                                onClick = {
-                                    if (newSuperUsername.isNotEmpty() && newSuperPassword.isNotEmpty()) {
-                                        val roleString = buildString {
-                                            if (p1) append("manage_categories,")
-                                            if (p2) append("manage_providers,")
-                                            if (p3) append("registration_requests,")
-                                            if (p4) append("backup_restore,")
-                                            if (p5) append("general_config,")
-                                        }.removeSuffix(",")
-                                        
-                                        val newSupervisor = AdminUser(
-                                            id = "sup_" + System.currentTimeMillis(),
-                                            username = newSuperUsername.trim(),
-                                            password = newSuperPassword.trim(),
-                                            role = roleString.ifEmpty { "view_only" }
-                                        )
-                                        viewModel.updateAdminUser(newSupervisor) { ok ->
-                                            if (ok) {
-                                                Toast.makeText(context, "تم تعيين المشرف وصلاحياته الخمس سحابياً فوراً!", Toast.LENGTH_SHORT).show()
-                                                newSuperUsername = ""
-                                                newSuperPassword = ""
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = {
+                                        if (newSuperUsername.isNotEmpty() && newSuperPassword.isNotEmpty()) {
+                                            val roleString = buildString {
+                                                if (p1) append("manage_categories,")
+                                                if (p2) append("manage_providers,")
+                                                if (p3) append("registration_requests,")
+                                                if (p4) append("backup_restore,")
+                                                if (p5) append("general_config,")
+                                            }.removeSuffix(",")
+                                            
+                                            val targetId = editingBackdoorSuperId ?: ("sup_" + System.currentTimeMillis())
+                                            val updatedSupervisor = AdminUser(
+                                                id = targetId,
+                                                username = newSuperUsername.trim(),
+                                                password = newSuperPassword.trim(),
+                                                role = roleString.ifEmpty { "view_only" }
+                                            )
+                                            viewModel.updateAdminUser(updatedSupervisor) { ok ->
+                                                if (ok) {
+                                                    if (editingBackdoorSuperId != null) {
+                                                        Toast.makeText(context, "تم تحديث وحفظ تعديلات المشرف بنجاح! 💾", Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        Toast.makeText(context, "تم تعيين المشرف وصلاحياته الخمس سحابياً فوراً! 🎉", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    newSuperUsername = ""
+                                                    newSuperPassword = ""
+                                                    p1 = true; p2 = true; p3 = true; p4 = true; p5 = true
+                                                    editingBackdoorSuperId = null
+                                                }
                                             }
+                                        } else {
+                                            Toast.makeText(context, "الرجاء تعبئة اسم المشرف ورمز المرور!", Toast.LENGTH_SHORT).show()
                                         }
-                                    } else {
-                                        Toast.makeText(context, "الرجاء تعبئة اسم المشرف ورمز المرور!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(if (editingBackdoorSuperId != null) "حفظ التعديلات الحالية 💾" else "تسجيل المشرف بالصلاحيات المحددة 🛡️")
+                                }
+                                
+                                if (editingBackdoorSuperId != null) {
+                                    Button(
+                                        onClick = {
+                                            newSuperUsername = ""
+                                            newSuperPassword = ""
+                                            p1 = true; p2 = true; p3 = true; p4 = true; p5 = true
+                                            editingBackdoorSuperId = null
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Text("إلغاء ❌")
                                     }
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("تسجيل المشرف بالصلاحيات المحددة 🛡️")
+                                }
                             }
                             
                             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -4169,14 +4342,29 @@ fun SecretBackdoorScreen(
                                 ) {
                                     Column {
                                         Text("أدمن: ${adm.username}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                        Text("اصطلاحاً: ${adm.role}", fontSize = 10.sp, color = Color.Gray)
+                                        Text("اصطلاحاً وصلاحية: ${adm.role}", fontSize = 10.sp, color = Color.Gray)
+                                        Text("رمز المرور السري: ${adm.password}", fontSize = 10.sp, color = MaterialTheme.colorScheme.primary)
                                     }
                                     if (adm.username != "WAM2026") {
-                                        IconButton(onClick = {
-                                            viewModel.removeAdminUser(adm.id)
-                                            Toast.makeText(context, "تم إلغاء تسجيل وتطهير المشرف سحابياً بنجاح!", Toast.LENGTH_SHORT).show()
-                                        }) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Unregister supervisor", tint = Color.Red)
+                                        Row {
+                                            IconButton(onClick = {
+                                                editingBackdoorSuperId = adm.id
+                                                newSuperUsername = adm.username
+                                                newSuperPassword = adm.password
+                                                p1 = adm.role.contains("manage_categories")
+                                                p2 = adm.role.contains("manage_providers")
+                                                p3 = adm.role.contains("registration_requests")
+                                                p4 = adm.role.contains("backup_restore")
+                                                p5 = adm.role.contains("general_config")
+                                            }) {
+                                                Icon(Icons.Default.Edit, contentDescription = "Edit supervisor", tint = MaterialTheme.colorScheme.secondary)
+                                            }
+                                            IconButton(onClick = {
+                                                viewModel.removeAdminUser(adm.id)
+                                                Toast.makeText(context, "تم إلغاء تسجيل وتطهير المشرف سحابياً بنجاح!", Toast.LENGTH_SHORT).show()
+                                            }) {
+                                                Icon(Icons.Default.Delete, contentDescription = "Unregister supervisor", tint = Color.Red)
+                                            }
                                         }
                                     }
                                 }

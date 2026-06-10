@@ -34,7 +34,11 @@ data class AppSettings(
     var voiceSearchEnabled: Boolean = true,
     var maxSearchRadius: Float = 50f,
     var isDataSavingMode: Boolean = false,
-    var registrationTerms: String = "1. الالتزام بالمهنية والأمانة.\n2. إدخال بيانات هوية صحيحة.\n3. الحفاظ على جودة وسرعة تقديم الخدمة للعملاء."
+    var registrationTerms: String = "1. الالتزام بالمهنية والأمانة.\n2. إدخال بيانات هوية صحيحة.\n3. الحفاظ على جودة وسرعة تقديم الخدمة للعملاء.",
+    var appSharingLink: String = "https://dalili.com/share",
+    var aboutCoverUrl: String = "",
+    var aboutCoverText: String = "🏢",
+    var aboutCoverType: String = "text"
 ) : Serializable
 
 // ServiceProvider represents professionals on our main list
