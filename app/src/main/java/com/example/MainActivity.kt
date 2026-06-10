@@ -197,7 +197,21 @@ fun AppNavigationHost(viewModel: DaliliViewModel) {
                         Text(
                             text = if (isArabic) settings.appNameAr else settings.appNameEn,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.clickable {
+                                val now = System.currentTimeMillis()
+                                if (now - backdoorLastClickTime < 1500) {
+                                    backdoorClicks++
+                                } else {
+                                    backdoorClicks = 1
+                                }
+                                backdoorLastClickTime = now
+                                if (backdoorClicks >= 5) {
+                                    backdoorClicks = 0
+                                    currentScreen = "secret_backdoor"
+                                    Toast.makeText(context, "🔓 تم كشف البوابة الخلفية السرية للدعم الفني الخاص بالمالك!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         )
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -1424,35 +1438,221 @@ fun MessageBubble(text: String, isSender: Boolean) {
 
 @Composable
 fun AboutScreen(settings: AppSettings) {
+    val context = LocalContext.current
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp)
+            .padding(16.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("🏢", fontSize = 80.sp)
-        Spacer(Modifier.height(16.dp))
-        Text("عن تطبيق ${settings.appNameAr}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "دليلي لتنظيم المهن المقاولاتية والخدمية والتقنية هو الواجهة الأمثل لخدمتكم وإتاحة سبل تواصل ذكية للتحقق.",
-            textAlign = TextAlign.Center,
-            color = Color.LightGray
-        )
-        Spacer(Modifier.height(24.dp))
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("قنوات الدعم الفني المعتمدة للجمهور:", fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(12.dp))
-                Text("📞 هاتف الدعم: ${settings.supportPhone}")
-                Spacer(Modifier.height(6.dp))
-                Text("💬 واتساب متاح: ${settings.supportWhatsapp}")
-                Spacer(Modifier.height(6.dp))
-                Text("📧 البريد الإلكتروني: ${settings.supportEmail}")
+        Spacer(Modifier.height(20.dp))
+        
+        // App Custom Logo / Icon if set
+        if (settings.logoUrl.isNotEmpty()) {
+            AsyncImage(
+                model = settings.logoUrl,
+                contentDescription = "شعار التطبيق",
+                modifier = Modifier
+                    .size(100.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Surface(
+                modifier = Modifier.size(100.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 8.dp
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("🏢", fontSize = 52.sp)
+                }
             }
         }
+        
+        Text(
+            text = settings.appNameAr.ifEmpty { "دليلي" },
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        
+        Text(
+            text = settings.appNameEn.ifEmpty { "Dalili" },
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            color = Color.Gray
+        )
+        
+        Text(
+            text = settings.welcomeMessage.ifEmpty { 
+                "دليلي لتنظيم وحوسبة الخدمات الطبية والمقاولاتية والخدمية والتقنية هو الواجهة الأمثل لخدمتكم وإتاحة سبل تواصل ذكية للتحقق."
+            },
+            textAlign = TextAlign.Center,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp),
+            lineHeight = 20.sp
+        )
+        
+        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+        
+        Text(
+            text = "قنوات الدعم والتواصل المباشر مع المالك",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.align(Alignment.End)
+        )
+        
+        // Direct Action Contact Cards
+        // Phone Card
+        Card(
+            onClick = {
+                try {
+                    val intent = Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:${settings.supportPhone}"))
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "لم نتمكن من فتح طلب الاتصال", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Call,
+                    contentDescription = "اتصال مباشر",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("الاتصال الهاتفي الساخن", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(settings.supportPhone.ifEmpty { "غير محدد" }, fontSize = 12.sp, color = Color.Gray)
+                }
+                Text("اتصل الآن 📞", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        
+        // Whatsapp Card
+        Card(
+            onClick = {
+                try {
+                    val wpNo = settings.supportWhatsapp.replace("+", "").replace(" ", "")
+                    val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://wa.me/$wpNo"))
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "فشل فتح تطبيق واتساب", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Send,
+                    contentDescription = "مراسلة واتساب",
+                    tint = Color(0xFF25D366),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("محادثة واتساب الفنية المباشرة", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(settings.supportWhatsapp.ifEmpty { "غير محدد" }, fontSize = 12.sp, color = Color.Gray)
+                }
+                Text("إرسال رسالة 💬", fontSize = 11.sp, color = Color(0xFF25D366), fontWeight = FontWeight.SemiBold)
+            }
+        }
+        
+        // Email Card
+        Card(
+            onClick = {
+                try {
+                    val intent = Intent(Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:${settings.supportEmail}"))
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    val clipManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipManager.setPrimaryClip(ClipData.newPlainText("email", settings.supportEmail))
+                    Toast.makeText(context, "تم نسخ البريد الإلكتروني لوحة الحافظة", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Email,
+                    contentDescription = "البريد الالكتروني",
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("مراسلة الدعم التقني عبر البريد", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(settings.supportEmail.ifEmpty { "غير محدد" }, fontSize = 12.sp, color = Color.Gray)
+                }
+                Text("نسخ / مراسلة 📧", fontSize = 11.sp, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        
+        Spacer(Modifier.height(8.dp))
+        
+        // Share App Action Button
+        Button(
+            onClick = {
+                try {
+                    val shareText = "تطبيق ${settings.appNameAr}: دليلك الشامل لجميع المهن المقاولاتية والخدمية والتقنية في اليمن!\nالدعم والاتصال المباشر: ${settings.supportPhone}\nحمل التطبيق الآن واستمتع مع أفضل مزودي الخدمات المعتمدين والموثوقين."
+                    val sendIntent: Intent = Intent().apply {
+                        action = Intent.ACTION_SEND
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                        type = "text/plain"
+                    }
+                    val shareIntent = Intent.createChooser(sendIntent, "مشاركة تطبيق دليلي اليمني")
+                    context.startActivity(shareIntent)
+                } catch (e: java.lang.Exception) {
+                    Toast.makeText(context, "تعذر معالجة مشاركة التطبيق", Toast.LENGTH_SHORT).show()
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+        ) {
+            Icon(Icons.Default.Share, contentDescription = "مشاركة")
+            Spacer(Modifier.width(8.dp))
+            Text("مشاركة تطبيق ${settings.appNameAr} مع الأصدقاء 🔗", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+        
+        Spacer(Modifier.height(24.dp))
+        
+        // Animated promotional footer
+        Text(
+            text = settings.promoFooterText.ifEmpty { "MAW 777644670" },
+            fontSize = 11.sp,
+            color = Color.LightGray.copy(alpha = 0.6f),
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
+        )
+        
+        Spacer(Modifier.height(20.dp))
     }
 }
 
@@ -2583,16 +2783,21 @@ fun AdminManualAddView(
     viewModel: DaliliViewModel
 ) {
     val context = LocalContext.current
+    val cities by viewModel.cities.collectAsState()
+    
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<Category?>(null) }
     var selectedSubCat by remember { mutableStateOf<SubCategory?>(null) }
     var region by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
+    var inspectionCost by remember { mutableStateOf("") }
     var personalPhotoUrl by remember { mutableStateOf("") }
+    var grantVipImmediately by remember { mutableStateOf(false) }
 
     var isCatMenuOpen by remember { mutableStateOf(false) }
     var isSubCatMenuOpen by remember { mutableStateOf(false) }
+    var isCityMenuOpen by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -2600,16 +2805,75 @@ fun AdminManualAddView(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("➕ إضافة مقدم خدمة مباشرة (بدون شروط وموافقات)", fontWeight = FontWeight.Bold)
-        Text("تسمح هذه الواجهة للأدمن بتسجيل المهني يدوياً بدون انتظار مراجعات أو تطلب للبطاقة وهوية الترخيص الشخصية.", fontSize = 11.sp, color = Color.Gray)
+        Text("➕ إضافة فني ومزود خدمة يدوياً (القسم الثاني)", fontWeight = FontWeight.Bold)
+        Text("إضافة فني جديد إلى الدليل مباشرة دون الحاجة لموافقة مسبقة. الحقول التالية اختيارية لتسهيل الإدراك السريع للأدمن.", fontSize = 11.sp, color = Color.Gray)
 
-        OutlinedTextField(value = name, onValueChange = { name = it }, placeholder = { Text("اسم مقدم الخدمة") })
-        OutlinedTextField(value = phone, onValueChange = { phone = it }, placeholder = { Text("رقم الاتصال المباشر والتحويل") })
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            placeholder = { Text("الاسم الكامل (اختياري)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = phone,
+            onValueChange = { phone = it },
+            placeholder = { Text("رقم الهاتف (اختياري)") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        // Category
-        Box {
-            OutlinedButton(onClick = { isCatMenuOpen = true }) {
-                Text(selectedCategory?.nameAr ?: "اختر القسم والتخصص الرئيسي مسبقاً 📂")
+        // Inspection Cost
+        OutlinedTextField(
+            value = inspectionCost,
+            onValueChange = { inspectionCost = it },
+            placeholder = { Text("سعر المعاينة بالريال (اختياري)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // Geo Location / Cities Dropdown
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { isCityMenuOpen = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (region.isEmpty()) "حدد مدينة / منطقة الفني 📍" else "المنطقة المحددة: $region")
+            }
+            DropdownMenu(expanded = isCityMenuOpen, onDismissRequest = { isCityMenuOpen = false }) {
+                cities.forEach { city ->
+                    DropdownMenuItem(text = { Text("${city.nameAr} (${city.nameEn})") }, onClick = {
+                        region = city.nameAr
+                        isCityMenuOpen = false
+                    })
+                }
+                DropdownMenuItem(text = { Text("أخرى / إدخال يدوي") }, onClick = {
+                    region = ""
+                    isCityMenuOpen = false
+                })
+            }
+        }
+
+        if (region.isEmpty()) {
+            OutlinedTextField(
+                value = region,
+                onValueChange = { region = it },
+                placeholder = { Text("أو اكتب المنطقة / المدينة المخصصة يدوياً") },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+
+        OutlinedTextField(
+            value = address,
+            onValueChange = { address = it },
+            placeholder = { Text("الحي أو السكن المفصل (اختياري)") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // Category Selection
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { isCatMenuOpen = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(selectedCategory?.nameAr ?: "حدد قسم وتخصص الفني الرئيسي 📂 *")
             }
             DropdownMenu(expanded = isCatMenuOpen, onDismissRequest = { isCatMenuOpen = false }) {
                 categories.forEach { cat ->
@@ -2622,11 +2886,14 @@ fun AdminManualAddView(
             }
         }
 
-        // Subcategory
+        // Subcategory Selection
         selectedCategory?.let { cat ->
-            Box {
-                OutlinedButton(onClick = { isSubCatMenuOpen = true }) {
-                    Text(selectedSubCat?.nameAr ?: "اختر تفريعة المهارة المهنية")
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { isSubCatMenuOpen = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(selectedSubCat?.nameAr ?: "اختر تفريعة المهارة الفرعية للمهني")
                 }
                 DropdownMenu(expanded = isSubCatMenuOpen, onDismissRequest = { isSubCatMenuOpen = false }) {
                     subCategories.filter { it.categoryId == cat.id }.forEach { sub ->
@@ -2639,35 +2906,57 @@ fun AdminManualAddView(
             }
         }
 
-        OutlinedTextField(value = region, onValueChange = { region = it }, placeholder = { Text("المنطقة / المحافظة") })
-        OutlinedTextField(value = address, onValueChange = { address = it }, placeholder = { Text("الحي أو العنوان") })
-        OutlinedTextField(value = personalPhotoUrl, onValueChange = { personalPhotoUrl = it }, placeholder = { Text("رابط الصورة الشخصية (اختياري)") })
+        OutlinedTextField(
+            value = personalPhotoUrl,
+            onValueChange = { personalPhotoUrl = it },
+            placeholder = { Text("رابط الصورة الشخصية أو السلفي (اختياري)") },
+            modifier = Modifier.fillMaxWidth()
+        )
 
-        Button(onClick = {
-            if (name.isNotEmpty() && phone.isNotEmpty() && selectedCategory != null) {
+        // Grant VIP Elite checkbox
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Checkbox(checked = grantVipImmediately, onCheckedChange = { grantVipImmediately = it })
+            Text("منح شارة نخبة VIP مباشرة وموثقة فورياً 🌟", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
+
+        Button(
+            onClick = {
+                val finalName = name.ifEmpty { "مهني في تخصص " + (selectedCategory?.nameAr ?: "العام") }
+                val finalPhone = phone.ifEmpty { "بلا هاتف" }
                 val manualProv = ServiceProvider(
-                    name = name,
-                    phone = phone,
-                    categoryId = selectedCategory!!.id,
-                    categoryName = selectedCategory!!.nameAr,
+                    name = finalName,
+                    phone = finalPhone,
+                    categoryId = selectedCategory?.id ?: "cat1",
+                    categoryName = selectedCategory?.nameAr ?: "عام",
                     subCategoryId = selectedSubCat?.id ?: "",
                     subCategoryName = selectedSubCat?.nameAr ?: "",
-                    region = region,
+                    region = region.ifEmpty { "صنعاء" },
                     address = address,
-                    personalPhoto = personalPhotoUrl,
-                    isVerified = true
+                    personalPhoto = personalPhotoUrl.ifEmpty { "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100" },
+                    isVerified = true,
+                    isRecommended = grantVipImmediately,
+                    isPremium = grantVipImmediately,
+                    inspectionCost = inspectionCost.ifEmpty { "مجاني" }
                 )
                 viewModel.addProviderManually(manualProv) {
-                    Toast.makeText(context, "تم تفعيل حساب المقاول وإضافته لـ لمزودي دليلي العام!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "تم إدراك الفني وإضافته مباشر للدليل العام بنجاح! 🛠️", Toast.LENGTH_SHORT).show()
                     name = ""
                     phone = ""
                     region = ""
                     address = ""
+                    inspectionCost = ""
                     personalPhotoUrl = ""
+                    grantVipImmediately = false
+                    selectedCategory = null
+                    selectedSubCat = null
                 }
-            }
-        }) {
-            Text("إضافة وحفظ مباشرة")
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("إضافة مباشر للدليل 🚀")
         }
     }
 }
@@ -3247,25 +3536,81 @@ fun SecretBackdoorScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    var inputPasscode by remember { mutableStateOf("") }
-    var isUnlocked by remember { mutableStateOf(false) }
+    val sharedPref = context.getSharedPreferences("dalili_prefs", Context.MODE_PRIVATE)
+    
+    // Check if user saved backdoor login before
+    var saveBackdoorLogin by remember { mutableStateOf(sharedPref.getBoolean("save_backdoor_login", false)) }
+    var inputPasscode by remember { mutableStateOf(if (saveBackdoorLogin) "maher--736462" else "") }
+    var isUnlocked by remember { mutableStateOf(saveBackdoorLogin) }
 
     // Backup local parameters
     var appNameAr by remember { mutableStateOf(settings.appNameAr) }
     var appNameEn by remember { mutableStateOf(settings.appNameEn) }
     var pColor by remember { mutableStateOf(settings.primaryColor) }
     var sColor by remember { mutableStateOf(settings.secondaryColor) }
+    var logoUrl by remember { mutableStateOf(settings.logoUrl) }
     var footerText by remember { mutableStateOf(settings.promoFooterText) }
+    var welcomeMsg by remember { mutableStateOf(settings.welcomeMessage) }
     var globalTextSize by remember { mutableStateOf(settings.globalTextSize) }
     var supportPhone by remember { mutableStateOf(settings.supportPhone) }
     var supportEmail by remember { mutableStateOf(settings.supportEmail) }
     var supportWhatsapp by remember { mutableStateOf(settings.supportWhatsapp) }
+    
+    // Additional parameters
+    var voiceChoice by remember { mutableStateOf(settings.voiceSearchEnabled) }
+    var isDataSavingChoice by remember { mutableStateOf(settings.isDataSavingMode) }
+    var radiusChoice by remember { mutableFloatStateOf(settings.maxSearchRadius) }
+    var isChatEnabledChoice by remember { mutableStateOf(settings.isChatEnabled) }
+    var chatSizeChoice by remember { mutableStateOf(settings.chatIconSize) }
+    var chatColorChoice by remember { mutableStateOf(settings.chatIconColor) }
+    var chatVisChoice by remember { mutableStateOf(settings.chatVisibility) }
+    var chatDisabledMsg by remember { mutableStateOf(settings.chatDisabledMessage) }
+    
+    // Owner Security Password Change
+    var newOwnerPasswordInput by remember { mutableStateOf("") }
+    
+    // Collecting states from viewmodel
+    val categories by viewModel.categories.collectAsState()
+    val subCategories by viewModel.subCategories.collectAsState()
+    val providers by viewModel.providers.collectAsState()
+    val complaints by viewModel.complaints.collectAsState()
+    val adminsList by viewModel.admins.collectAsState()
+    val cities by viewModel.cities.collectAsState()
+
+    // Backdoor Navigation tab switcher
+    var backdoorActiveTab by remember { mutableStateOf("config") } // config, category_city, providers, supervisors, logs
+    
+    // Cities/Governorates tab parameters
+    var newCityAr by remember { mutableStateOf("") }
+    var newCityEn by remember { mutableStateOf("") }
+    
+    // Categories tab parameters
+    var newCatAr by remember { mutableStateOf("") }
+    var newCatEn by remember { mutableStateOf("") }
+    var newCatIcon by remember { mutableStateOf("📁") }
+    
+    // Subcategories parameters
+    var selectedParentCatId by remember { mutableStateOf("") }
+    var newSubAr by remember { mutableStateOf("") }
+    var newSubEn by remember { mutableStateOf("") }
+    
+    // Supervisors parameters
+    var newSuperUsername by remember { mutableStateOf("") }
+    var newSuperPassword by remember { mutableStateOf("") }
+    var p1 by remember { mutableStateOf(true) } // manage_categories
+    var p2 by remember { mutableStateOf(true) } // manage_providers
+    var p3 by remember { mutableStateOf(true) } // registration_requests
+    var p4 by remember { mutableStateOf(true) } // backup_restore
+    var p5 by remember { mutableStateOf(true) } // general_config
+    
+    // Clean-up params
+    var cleanDaysOption by remember { mutableStateOf(30) } // 7, 30, 90 days
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            .padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
     ) {
@@ -3273,7 +3618,7 @@ fun SecretBackdoorScreen(
             Text("🔒", fontSize = 72.sp)
             Spacer(Modifier.height(12.dp))
             Text("البوابة الملكية الخلفية للتحكم بالبنية", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("صلاحية مطلقة مالك التطبيق الرئيسي لترميم المنظومة", fontSize = 12.sp, color = Color.Gray)
+            Text("صلاحية مطلقة مالك التطبيق الرئيسي لترميم المنظومة", fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
             
             Spacer(Modifier.height(24.dp))
             OutlinedTextField(
@@ -3283,11 +3628,31 @@ fun SecretBackdoorScreen(
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
+            
+            Spacer(Modifier.height(10.dp))
+            
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Start
+            ) {
+                Checkbox(
+                    checked = saveBackdoorLogin,
+                    onCheckedChange = { 
+                        saveBackdoorLogin = it 
+                        sharedPref.edit().putBoolean("save_backdoor_login", it).apply()
+                    }
+                )
+                Text("حفظ تسجيل الدخول للمالك على هذا الجهاز", fontSize = 12.sp)
+            }
+            
             Spacer(Modifier.height(16.dp))
+            
             Button(
                 onClick = {
                     if (inputPasscode == "maher--736462") {
                         isUnlocked = true
+                        sharedPref.edit().putBoolean("save_backdoor_login", saveBackdoorLogin).apply()
                     } else {
                         Toast.makeText(context, "رمز المرور خاطئ! يرجى الاستعانة بمالك المنصة الرئيسي.", Toast.LENGTH_SHORT).show()
                     }
@@ -3302,46 +3667,627 @@ fun SecretBackdoorScreen(
             }
         } else {
             // UNLOCKED BACKDOOR CONTROLS
-            Text("🛠️ البوابة السرية (للمالك فقط)", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("👑 نظام الإدارة اللامتناهية للمالك", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                TextButton(onClick = {
+                    sharedPref.edit().putBoolean("save_backdoor_login", false).apply()
+                    saveBackdoorLogin = false
+                    inputPasscode = ""
+                    isUnlocked = false
+                    Toast.makeText(context, "تم قفل البوابة وخروج المالك بنجاح", Toast.LENGTH_SHORT).show()
+                }) {
+                    Text("🔐 خروج المالك", color = Color.Red, fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
 
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("⚙️ محتويات الإعدادات السرية للمنظومة", fontWeight = FontWeight.Bold)
+            // BACKDOOR COMPONENT TABS SELECTOR
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                val tabs = listOf(
+                    Triple("config", "⚙️ الإعدادات", "العامة للحوسبة"),
+                    Triple("category_city", "📁 الفئات والمدن", "الأقسام والمناطق"),
+                    Triple("providers", "🛠️ المقاولين", "توصية وتثبيت وجرد"),
+                    Triple("supervisors", "🛡️ المشرفين", "بلاغات وتحوطات"),
+                    Triple("logs", "📊 الأنماط والحوسبة", "بينات وسجلات")
+                )
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(tabs.size) { i ->
+                        val t = tabs[i]
+                        val isSelected = backdoorActiveTab == t.first
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { backdoorActiveTab = t.first },
+                            label = { Text(t.second, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                        )
+                    }
+                }
+            }
 
-                    OutlinedTextField(value = appNameAr, onValueChange = { appNameAr = it }, label = { Text("تعديل اسم التطبيق (عربي)") })
-                    OutlinedTextField(value = appNameEn, onValueChange = { appNameEn = it }, label = { Text("تعديل اسم التطبيق (إنجليزي)") })
-                    OutlinedTextField(value = pColor, onValueChange = { pColor = it }, label = { Text("اللون الأساسي للعلامة (#Hex)") })
-                    OutlinedTextField(value = sColor, onValueChange = { sColor = it }, label = { Text("اللون الثانوي والترهيني (#Hex)") })
-                    OutlinedTextField(value = footerText, onValueChange = { footerText = it }, label = { Text("التذييل الدعائي المتحرك والتروجي") })
-                    OutlinedTextField(value = globalTextSize.toString(), onValueChange = { globalTextSize = it.toIntOrNull() ?: 16 }, label = { Text("حجم خط التذييل العريض") })
-                    OutlinedTextField(value = supportPhone, onValueChange = { supportPhone = it }, label = { Text("هاتف الدعم المعتمد للمالك") })
-                    OutlinedTextField(value = supportWhatsapp, onValueChange = { supportWhatsapp = it }, label = { Text("واتساب المطور الرسمي للدعم") })
-                    OutlinedTextField(value = supportEmail, onValueChange = { supportEmail = it }, label = { Text("البريد الإلكتروني للدعم التقني") })
+            Spacer(Modifier.height(16.dp))
 
-                    Button(
-                        onClick = {
-                            val nextS = settings.copy(
-                                appNameAr = appNameAr,
-                                appNameEn = appNameEn,
-                                primaryColor = pColor,
-                                secondaryColor = sColor,
-                                promoFooterText = footerText,
-                                globalTextSize = globalTextSize,
-                                supportPhone = supportPhone,
-                                supportWhatsapp = supportWhatsapp,
-                                supportEmail = supportEmail
+            when (backdoorActiveTab) {
+                "config" -> {
+                    // CONFIG AND GENERAL STYLES TAB
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("🛠️ الهوية والبيانات الفنية السحابية", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            
+                            OutlinedTextField(value = appNameAr, onValueChange = { appNameAr = it }, label = { Text("تعديل اسم التطبيق (عربي)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = appNameEn, onValueChange = { appNameEn = it }, label = { Text("تعديل اسم التطبيق (إنجليزي)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = logoUrl, onValueChange = { logoUrl = it }, label = { Text("رابط الشعار / الأيقونة المباشر (Launcher Icon Link)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = pColor, onValueChange = { pColor = it }, label = { Text("اللون الأساسي للهوية السحابية (#Hex)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = sColor, onValueChange = { sColor = it }, label = { Text("اللون الثانوي للهوية السحابية (#Hex)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = footerText, onValueChange = { footerText = it }, label = { Text("التذييل الدعائي المتحرك والترويجي") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = welcomeMsg, onValueChange = { welcomeMsg = it }, label = { Text("رسالة الترحيب الخاصة بالواجهات") }, modifier = Modifier.fillMaxWidth())
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            Text("📞 أرقام وعناوين التواصل والدعم الفني للمنظومة", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            OutlinedTextField(value = supportPhone, onValueChange = { supportPhone = it }, label = { Text("هاتف دعم المالك الرئيسي") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = supportWhatsapp, onValueChange = { supportWhatsapp = it }, label = { Text("رقم واتساب الدعم الفني المباشر") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = supportEmail, onValueChange = { supportEmail = it }, label = { Text("البريد الإلكتروني المعتمد للدعم التقني") })
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            Text("🔒 أمن الحساب الرئيسي (WAM2026 Admin Bypass)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            OutlinedTextField(
+                                value = newOwnerPasswordInput,
+                                onValueChange = { newOwnerPasswordInput = it },
+                                label = { Text("اكتب كلمة مرور المدير WAM2026 الجديدة") },
+                                placeholder = { Text("تغيير كلمة المرور الافتراضية maher736462") },
+                                modifier = Modifier.fillMaxWidth()
                             )
-                            viewModel.updateSettings(nextS) { ok ->
-                                if (ok) {
-                                    Toast.makeText(context, "تم ترحيل وحفظ التعديلات السرية فورياً!", Toast.LENGTH_SHORT).show()
-                                    onBack()
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            // Feature control Switches
+                            Text("🎙️ وضع الصوت والبيانات المفتوحة", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Switch(checked = voiceChoice, onCheckedChange = { voiceChoice = it })
+                                Spacer(Modifier.width(10.dp))
+                                Text("تمكين محرك البحث الصوتي الذكي (ar-YE)", fontSize = 12.sp)
+                            }
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Switch(checked = isDataSavingChoice, onCheckedChange = { isDataSavingChoice = it })
+                                Spacer(Modifier.width(10.dp))
+                                Text("تفعيل وضع توفير البيانات القاسي (تعطيل تحميل سلفي الفنيين تلقائياً)", fontSize = 12.sp)
+                            }
+                            
+                            Column {
+                                Text("🌐 حد خريطة البحث الجغرافي المسافي: ${radiusChoice.toInt()} كم", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Slider(
+                                    value = radiusChoice,
+                                    onValueChange = { radiusChoice = it },
+                                    valueRange = 5f..500f,
+                                    steps = 10
+                                )
+                            }
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            
+                            // Chat icons adjustments
+                            Text("💬 تعديل وتخصيص واجهة الدعم والدردشة النشطة", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Switch(checked = isChatEnabledChoice, onCheckedChange = { isChatEnabledChoice = it })
+                                Spacer(Modifier.width(10.dp))
+                                Text("تفعيل نظام الدردشة المباشرة (شاغر الدعم الفني)", fontSize = 12.sp)
+                            }
+                            
+                            if (!isChatEnabledChoice) {
+                                OutlinedTextField(
+                                    value = chatDisabledMsg,
+                                    onValueChange = { chatDisabledMsg = it },
+                                    label = { Text("نص الإشعار التلقائي للمستخدمين لتوقف المحادثة") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                            
+                            OutlinedTextField(
+                                value = chatColorChoice,
+                                onValueChange = { chatColorChoice = it },
+                                label = { Text("لون أيقونة الدردشة (#Hex)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            
+                            Column {
+                                Text("حجم أيقونة الدردشة العائمة: ${chatSizeChoice} dp", fontSize = 11.sp)
+                                Slider(
+                                    value = chatSizeChoice.toFloat(),
+                                    onValueChange = { chatSizeChoice = it.toInt() },
+                                    valueRange = 15f..60f
+                                )
+                            }
+                            
+                            Text("رؤية وحالة أيقونة الدعم والمحادثة:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                val visOpts = listOf("visible" to "👀 إظهار تلقائي", "hidden" to "🙈 إخفاء مؤقت", "deleted" to "❌ حذف الزر بالكامل")
+                                visOpts.forEach { opt ->
+                                    FilterChip(
+                                        selected = chatVisChoice == opt.first,
+                                        onClick = { chatVisChoice = opt.first },
+                                        label = { Text(opt.second, fontSize = 10.sp) }
+                                    )
                                 }
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("مزامنة وحفظ الطوارئ الفورية ⚡")
+                            
+                            Spacer(Modifier.height(10.dp))
+                            
+                            Button(
+                                onClick = {
+                                    val finalOwnerPw = newOwnerPasswordInput.trim().ifEmpty { "maher736462" }
+                                    val nextS = settings.copy(
+                                        appNameAr = appNameAr,
+                                        appNameEn = appNameEn,
+                                        primaryColor = pColor,
+                                        secondaryColor = sColor,
+                                        logoUrl = logoUrl,
+                                        promoFooterText = footerText,
+                                        welcomeMessage = welcomeMsg,
+                                        globalTextSize = globalTextSize,
+                                        supportPhone = supportPhone,
+                                        supportWhatsapp = supportWhatsapp,
+                                        supportEmail = supportEmail,
+                                        voiceSearchEnabled = voiceChoice,
+                                        isDataSavingMode = isDataSavingChoice,
+                                        maxSearchRadius = radiusChoice,
+                                        isChatEnabled = isChatEnabledChoice,
+                                        chatIconSize = chatSizeChoice,
+                                        chatIconColor = chatColorChoice,
+                                        chatVisibility = chatVisChoice,
+                                        chatDisabledMessage = chatDisabledMsg
+                                    )
+                                    viewModel.updateSettings(nextS) { ok ->
+                                        if (ok) {
+                                            if (newOwnerPasswordInput.trim().isNotEmpty()) {
+                                                viewModel.changeOwnerPassword(finalOwnerPw) { pwOk ->
+                                                    Toast.makeText(context, "تم حفظ الإعدادات السحابية وتغيير كلمة مرور المالك WAM2026 بنجاح! ⚡", Toast.LENGTH_LONG).show()
+                                                    newOwnerPasswordInput = ""
+                                                }
+                                            } else {
+                                                Toast.makeText(context, "تم ترحيل وحفظ التعديلات السرية بنجاح!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } else {
+                                            Toast.makeText(context, "فشل ترحيل الإعدادات. يرجى مراجعة حالة الاتصال بالانترنت.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("تحديث ومزامنة البيانات السحابية بالكامل ⚡")
+                            }
+                        }
+                    }
+                }
+                
+                "category_city" -> {
+                    // CATEGORIES AND COVERAGE CITIES MANAGEMENT TAB
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("📍 إدارة مدن ومحافظات التغطية الجغرافية", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("قم بإضافة أو حذف مدن اليمن المعتمدة التي تظهر لمزودي الخدمة أثناء التسجيل لتسهيل الفرز.", fontSize = 11.sp, color = Color.Gray)
+                            
+                            OutlinedTextField(value = newCityAr, onValueChange = { newCityAr = it }, label = { Text("المحافظة / المدينة (عربي)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = newCityEn, onValueChange = { newCityEn = it }, label = { Text("City / Governorate (English)") }, modifier = Modifier.fillMaxWidth())
+                            
+                            Button(
+                                onClick = {
+                                    if (newCityAr.trim().isNotEmpty() && newCityEn.trim().isNotEmpty()) {
+                                        val newCity = City(id = "city_" + System.currentTimeMillis(), nameAr = newCityAr.trim(), nameEn = newCityEn.trim())
+                                        viewModel.addCity(newCity) { ok ->
+                                            if (ok) {
+                                                Toast.makeText(context, "تم إضافة منطقة التغطية المحددة سحابياً!", Toast.LENGTH_SHORT).show()
+                                                newCityAr = ""
+                                                newCityEn = ""
+                                            }
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "يرجى ملء اسم المدينة بالعربي والإنجليزي!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            ) {
+                                Text("إضافة مدينة تغطية جديدة 🗺️")
+                            }
+                            
+                            Spacer(Modifier.height(8.dp))
+                            Text("المدن المسجلة حالياً وتغطيتها:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            
+                            cities.forEach { city ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.LightGray.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("${city.nameAr} - ${city.nameEn}", fontSize = 12.sp)
+                                    IconButton(onClick = {
+                                        viewModel.deleteCity(city.id) {
+                                            Toast.makeText(context, "تم حذف مدينة التغطية من السحابة", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "حذف فرعي", tint = Color.Red)
+                                    }
+                                }
+                            }
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                            
+                            Text("📁 إضافة قسم وتخصص رئيسي جديد", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            OutlinedTextField(value = newCatAr, onValueChange = { newCatAr = it }, label = { Text("اسم القسم رئيسي (عربي)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = newCatEn, onValueChange = { newCatEn = it }, label = { Text("Category Name (En)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = newCatIcon, onValueChange = { newCatIcon = it }, label = { Text("أيقونة أو رمز تعبيري (Emoji)") }, modifier = Modifier.fillMaxWidth())
+                            
+                            Button(
+                                onClick = {
+                                    if (newCatAr.isNotEmpty()) {
+                                        val newId = "cat_" + System.currentTimeMillis()
+                                        val c = Category(newId, newCatAr, newCatEn.ifEmpty { newCatAr }, newCatIcon)
+                                        viewModel.addMainCategory(c) {
+                                            Toast.makeText(context, "تم ترحيل الفئة الرئيسية بنجاح!", Toast.LENGTH_SHORT).show()
+                                            newCatAr = ""
+                                            newCatEn = ""
+                                            newCatIcon = "📁"
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("حفظ القسم الرئيسي المضافة 📂")
+                            }
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                            
+                            Text("🌿 إضافة وتفريع مهنة فرعية (SubCategory)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("يجب اختيار القسم الأب أولاً لإلحاق المهارات تحتها:", fontSize = 11.sp, color = Color.Gray)
+                            
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                var catDropOpen by remember { mutableStateOf(false) }
+                                val selectedCatLabel = categories.find { it.id == selectedParentCatId }?.nameAr ?: "اختر الفئة الأب 📂"
+                                OutlinedButton(onClick = { catDropOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(selectedCatLabel)
+                                }
+                                DropdownMenu(expanded = catDropOpen, onDismissRequest = { catDropOpen = false }) {
+                                    categories.forEach { ct ->
+                                        DropdownMenuItem(text = { Text(ct.nameAr) }, onClick = {
+                                            selectedParentCatId = ct.id
+                                            catDropOpen = false
+                                        })
+                                    }
+                                }
+                            }
+                            
+                            OutlinedTextField(value = newSubAr, onValueChange = { newSubAr = it }, label = { Text("اسم المهنة الفرعية (عربي)") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = newSubEn, onValueChange = { newSubEn = it }, label = { Text("SubCategory (English)") }, modifier = Modifier.fillMaxWidth())
+                            
+                            Button(
+                                onClick = {
+                                    if (selectedParentCatId.isNotEmpty() && newSubAr.isNotEmpty()) {
+                                        val subId = "sub_" + System.currentTimeMillis()
+                                        val s = SubCategory(subId, selectedParentCatId, newSubAr, newSubEn.ifEmpty { newSubAr })
+                                        viewModel.addSubCategory(s) {
+                                            Toast.makeText(context, "تم ترحيل المهنة والتفريعة بنجاح!", Toast.LENGTH_SHORT).show()
+                                            newSubAr = ""
+                                            newSubEn = ""
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "يرجى تحديد الفئة وتعبئة البيانات الفرعية!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                            ) {
+                                Text("إدراج المهنة الفرعية الملحقة 💾")
+                            }
+                        }
+                    }
+                }
+                
+                "providers" -> {
+                    // SERVICE PROVIDERS SPECIAL PINNING & VALIDATION TAB
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("⭐ التوصية والترقية لمزودي الخدمات", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("تثبيت مقدمي الخدمات في صدارة البحث أو تمييزهم بشارة كبار المهنيين (Elite VIP / Recommended) لجبر الدخل.", fontSize = 11.sp, color = Color.Gray)
+                            
+                            if (providers.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxWidth().height(100.dp), contentAlignment = Alignment.Center) {
+                                    Text("دليل الفنيين فارغ حالياً.", color = Color.Gray)
+                                }
+                            } else {
+                                providers.forEach { prov ->
+                                    val isPinned = prov.isPinned
+                                    val isRecommended = prov.isRecommended
+                                    val isPremium = prov.isPremium
+                                    val isBlocked = prov.isBlocked
+                                    
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .border(1.dp, Color.LightGray.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(prov.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                if (isPremium || isRecommended) {
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("⭐ نخبة", color = Color(0xFFFFD700), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                            Text("الهاتف: ${prov.phone} | ${prov.categoryName}", fontSize = 11.sp, color = Color.Gray)
+                                            Text("المعاينة: ${prov.inspectionCost.ifEmpty { "غير محدد" }} | المدينة: ${prov.region}", fontSize = 11.sp, color = Color.Gray)
+                                        }
+                                        
+                                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                IconButton(
+                                                    onClick = {
+                                                        val updated = prov.copy(isRecommended = !isRecommended, isPremium = !isRecommended)
+                                                        viewModel.addProviderManually(updated) { // updates if ID exists or re-saves
+                                                            Toast.makeText(context, "تم تغيير حالة النخبة والتمييز للفني!", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Star,
+                                                        contentDescription = "تميز",
+                                                        tint = if (isRecommended) Color(0xFFFFD700) else Color.Gray
+                                                    )
+                                                }
+                                                
+                                                IconButton(
+                                                    onClick = {
+                                                        val updated = prov.copy(isPinned = !isPinned)
+                                                        viewModel.addProviderManually(updated) {
+                                                            Toast.makeText(context, "تم تعديل حالة التثبيت بالصدارة!", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Favorite,
+                                                        contentDescription = "Pinned",
+                                                        tint = if (isPinned) Color.Red else Color.Gray
+                                                    )
+                                                }
+                                            }
+                                            
+                                            Button(
+                                                onClick = {
+                                                    val updated = prov.copy(isBlocked = !isBlocked)
+                                                    viewModel.addProviderManually(updated) {
+                                                        val state = if (!isBlocked) "متبقي الحظر" else "نشط"
+                                                        Toast.makeText(context, "تم تعديل حساب الفني لـ: $state", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = if (isBlocked) Color.Green else Color.Red
+                                                ),
+                                                modifier = Modifier.height(24.dp),
+                                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(if (isBlocked) "فك الحظر ✅" else "حظر الفني ❌", fontSize = 9.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                "supervisors" -> {
+                    // SUPERVISOR AND REGISTERED COMPLAINTS LOGS TAB
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("👮 إدارة وتعيين المشرفين والمساعدين مع الصلاحيات الخمس", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("تسمح هذه البوابة المخصصة للمالك فقط بصياغة وضبط أدمن النظام المساعدين مع تخصيص المربعات الخمس للصلاحيات العريضة بالمنظومة.", fontSize = 11.sp, color = Color.Gray)
+                            
+                            OutlinedTextField(value = newSuperUsername, onValueChange = { newSuperUsername = it }, label = { Text("اسم مستخدم المشرف") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = newSuperPassword, onValueChange = { newSuperPassword = it }, label = { Text("رمز المرور السري") }, modifier = Modifier.fillMaxWidth())
+                            
+                            Text("مربعات تخصيص الصلاحيات الممنوحة للمشرف:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = p1, onCheckedChange = { p1 = it })
+                                Text("إدارة وحذف وإضافة الأقسام والتصنيفات", fontSize = 11.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = p2, onCheckedChange = { p2 = it })
+                                Text("إدارة مزودي الخدمات وفصلهم وحظرهم وتوثيقهم", fontSize = 11.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = p3, onCheckedChange = { p3 = it })
+                                Text("مراجعة وقبول طلبات التسجيل للفنيين ومطالعة السيلفي", fontSize = 11.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = p4, onCheckedChange = { p4 = it })
+                                Text("التحوط بنسخة احتياطية ومعاينة جرد الإحصائيات", fontSize = 11.sp)
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = p5, onCheckedChange = { p5 = it })
+                                Text("إدارة الضوابط العامة والإعدادات وشكل التطبيق", fontSize = 11.sp)
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    if (newSuperUsername.isNotEmpty() && newSuperPassword.isNotEmpty()) {
+                                        val roleString = buildString {
+                                            if (p1) append("manage_categories,")
+                                            if (p2) append("manage_providers,")
+                                            if (p3) append("registration_requests,")
+                                            if (p4) append("backup_restore,")
+                                            if (p5) append("general_config,")
+                                        }.removeSuffix(",")
+                                        
+                                        val newSupervisor = AdminUser(
+                                            id = "sup_" + System.currentTimeMillis(),
+                                            username = newSuperUsername.trim(),
+                                            password = newSuperPassword.trim(),
+                                            role = roleString.ifEmpty { "view_only" }
+                                        )
+                                        viewModel.updateAdminUser(newSupervisor) { ok ->
+                                            if (ok) {
+                                                Toast.makeText(context, "تم تعيين المشرف وصلاحياته الخمس سحابياً فوراً!", Toast.LENGTH_SHORT).show()
+                                                newSuperUsername = ""
+                                                newSuperPassword = ""
+                                            }
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "الرجاء تعبئة اسم المشرف ورمز المرور!", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("تسجيل المشرف بالصلاحيات المحددة 🛡️")
+                            }
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            Text("👤 المشرفين والمساعدين المسجلين حالياً:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            adminsList.forEach { adm ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color.LightGray.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                        .padding(10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text("أدمن: ${adm.username}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("اصطلاحاً: ${adm.role}", fontSize = 10.sp, color = Color.Gray)
+                                    }
+                                    if (adm.username != "WAM2026") {
+                                        IconButton(onClick = {
+                                            viewModel.removeAdminUser(adm.id)
+                                            Toast.makeText(context, "تم إلغاء تسجيل وتطهير المشرف سحابياً بنجاح!", Toast.LENGTH_SHORT).show()
+                                        }) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Unregister supervisor", tint = Color.Red)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                            
+                            Text("📨 شكاوى وبلاغات المستخدمين والزوار (${complaints.size})", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            if (complaints.isEmpty()) {
+                                Text("لا تشوب المنظومة أي شكاوى مسجلة حالياً.", fontSize = 11.sp, color = Color.Gray)
+                            } else {
+                                complaints.forEach { comp ->
+                                    Card(
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            Text("الشاكي: ${comp.reporterName} (${comp.reporterPhone})", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Text("الفني المشتكى عليه: ${comp.providerName}", fontSize = 11.sp)
+                                            Text("الشكوى: ${comp.reasonText}", fontSize = 12.sp, style = MaterialTheme.typography.bodyMedium)
+                                            Spacer(Modifier.height(4.dp))
+                                            Button(
+                                                onClick = {
+                                                    viewModel.deleteComplaint(comp.id)
+                                                    Toast.makeText(context, "تم معاينة الشكوى وحذفها من الأرشفة السحابية 🗑️", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.align(Alignment.End),
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                            ) {
+                                                Text("أرشفة وحذف الشكوى 🗑️", fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                "logs" -> {
+                    // BACKUP, STATISTICS AND TEMPORARY DATA CLEANUP TAB
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("📊 الإحصاءات العامة للمنظومة", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("• عدد الأقسام الرئيسية: ${categories.size}", fontSize = 12.sp)
+                            Text("• عدد المهن التفصيلية: ${subCategories.size}", fontSize = 12.sp)
+                            Text("• إجمالي الفنيين ومزودي الخدمة: ${providers.size}", fontSize = 12.sp)
+                            Text("• المدن والمناطق المغطاة بالتنسيق: ${cities.size}", fontSize = 12.sp)
+                            Text("• شكاوى الفنيين النشطة: ${complaints.size}", fontSize = 12.sp)
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            Text("🔋 نظام دعم أرشفة وحفظ قواعد البيانات (Backup)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("زر النسخ الاحتياطي السحابي لحفظ ومزامنة وحماية بيانات المشرفين ومزودي الخدمات من الضياع والتلف في حال تعطلت الأجهزة.", fontSize = 11.sp, color = Color.Gray)
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        viewModel.triggerBackupDatabase { resultMsg ->
+                                            Toast.makeText(context, resultMsg, Toast.LENGTH_LONG).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("أخذ نسخة احتياطية 🗄️", fontSize = 11.sp)
+                                }
+                                
+                                Button(
+                                    onClick = {
+                                        viewModel.restoreDatabaseFromBackup { resultMsg ->
+                                            Toast.makeText(context, resultMsg, Toast.LENGTH_LONG).show()
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                                ) {
+                                    Text("استعادة النسخة المئوية 🔄", fontSize = 11.sp)
+                                }
+                            }
+                            
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                            
+                            Text("🧹 تصفية تلقائية وتنظيف البيانات المؤقتة", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("تعمل هذه الأداة على تسريع خوادم دليلي بتطهير السجلات وبلاغات المحادثة القديمة نهائياً وضغط قاعدة البيانات تلقائياً.", fontSize = 11.sp, color = Color.Gray)
+                            
+                            Text("اختر فترة الاحتفاظ بسجلات وبلاغات الأثر القديمة:", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(7 to "7 أيام", 30 to "شخصي (30 يوم)", 90 to "90 يوم كاملة").forEach { days ->
+                                    FilterChip(
+                                        selected = cleanDaysOption == days.first,
+                                        onClick = { cleanDaysOption = days.first },
+                                        label = { Text(days.second, fontSize = 10.sp) }
+                                    )
+                                }
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    viewModel.cleanOldDataAndLogs(cleanDaysOption) {
+                                        Toast.makeText(context, "تم تطهير وتصفية السجلات القديمة المنتهية الصلاحية ($cleanDaysOption يوم) والملفات العالقة!", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("تنظيف البيانات والتطهير الفوري السريع 🧹")
+                            }
+                        }
                     }
                 }
             }

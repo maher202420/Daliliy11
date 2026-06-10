@@ -28,7 +28,13 @@ data class AppSettings(
     var chatDisabledMessage: String = "نعتذر، خدمة المحادثة الفورية معطلة حالياً بطلب من الإدارة.",
     var globalTextSize: Int = 16,
     var globalTextColor: String = "#FFFFFF",
-    var globalFontFamily: String = "Cairo"
+    var globalFontFamily: String = "Cairo",
+    var logoUrl: String = "", 
+    var welcomeMessage: String = "مرحباً بكم في دليلي - دليل الخدمات الشامل في اليمن 🇾🇪",
+    var voiceSearchEnabled: Boolean = true,
+    var maxSearchRadius: Float = 50f,
+    var isDataSavingMode: Boolean = false,
+    var registrationTerms: String = "1. الالتزام بالمهنية والأمانة.\n2. إدخال بيانات هوية صحيحة.\n3. الحفاظ على جودة وسرعة تقديم الخدمة للعملاء."
 ) : Serializable
 
 // ServiceProvider represents professionals on our main list
@@ -54,7 +60,8 @@ data class ServiceProvider(
     var latitude: Double = 15.3694, //Default Sana'a
     var longitude: Double = 44.1910,
     var subscriptionExpiry: Long = 0L, // Expiry timestamp
-    var subscriptionStatus: String = "none" // none, pending_approval, active
+    var subscriptionStatus: String = "none", // none, pending_approval, active
+    var inspectionCost: String = "" // service inspection cost by technician
 ) : Serializable
 
 // Category representation
@@ -145,3 +152,10 @@ data class ServiceOrder(
     var orderDate: Long = System.currentTimeMillis(),
     var status: String = "completed" // pending, completed
 ) : Serializable
+
+data class City(
+    var id: String = "",
+    var nameAr: String = "",
+    var nameEn: String = ""
+) : Serializable
+

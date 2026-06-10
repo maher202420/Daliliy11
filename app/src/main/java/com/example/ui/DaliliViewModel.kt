@@ -61,6 +61,9 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
     private val _serviceOrders = MutableStateFlow<List<ServiceOrder>>(emptyList())
     val serviceOrders: StateFlow<List<ServiceOrder>> = _serviceOrders.asStateFlow()
 
+    private val _cities = MutableStateFlow<List<City>>(emptyList())
+    val cities: StateFlow<List<City>> = _cities.asStateFlow()
+
     // Firestore listener registrations for real-time synchronization
     private val listeners = mutableListOf<ListenerRegistration>()
 
@@ -217,6 +220,17 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
         )
+
+        // 13. Cities list sync listener
+        listeners.add(
+            firestore.collection("cities")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) return@addSnapshotListener
+                    if (snapshot != null) {
+                        _cities.value = snapshot.toObjects(City::class.java)
+                    }
+                }
+        )
     }
 
     private fun loadOfflineFallbackData() {
@@ -287,6 +301,12 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
 
         _admins.value = listOf(
             AdminUser("adm1", "WAM2026", "maher736462", "owner")
+        )
+
+        _cities.value = listOf(
+            City("city1", "إب", "Ibb"),
+            City("city2", "الحديدة", "Hodeidah"),
+            City("city3", "صنعاء", "Sanaa")
         )
     }
 
@@ -746,6 +766,108 @@ class DaliliViewModel(application: Application) : AndroidViewModel(application) 
             val list = _admins.value.toMutableList()
             list.removeAll { it.id == adminId }
             _admins.value = list
+        }
+    }
+
+    fun updateAdminUser(admin: AdminUser, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("admins").document(admin.id).set(admin)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _admins.value.toMutableList()
+            val index = list.indexOfFirst { it.id == admin.id }
+            if (index != -1) {
+                list[index] = admin
+                _admins.value = list
+            }
+            onComplete(true)
+        }
+    }
+
+    fun changeOwnerPassword(newPass: String, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val targetAdmin = _admins.value.find { it.username == "WAM2026" } ?: AdminUser("adm1", "WAM2026", "maher736462", "owner")
+        targetAdmin.password = newPass
+        if (firestore != null) {
+            firestore.collection("admins").document(targetAdmin.id).set(targetAdmin)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _admins.value.toMutableList()
+            val index = list.indexOfFirst { it.id == targetAdmin.id }
+            if (index != -1) {
+                list[index] = targetAdmin
+            } else {
+                list.add(targetAdmin)
+            }
+            _admins.value = list
+            onComplete(true)
+        }
+    }
+
+    fun addCity(city: City, onComplete: (Boolean) -> Unit) {
+        val firestore = db
+        val id = city.id.ifEmpty { "city_" + System.currentTimeMillis() }
+        city.id = id
+        if (firestore != null) {
+            firestore.collection("cities").document(id).set(city)
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _cities.value.toMutableList()
+            list.add(city)
+            _cities.value = list
+            onComplete(true)
+        }
+    }
+
+    fun deleteCity(cityId: String, onComplete: (Boolean) -> Unit = {}) {
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("cities").document(cityId).delete()
+                .addOnSuccessListener { onComplete(true) }
+                .addOnFailureListener { onComplete(false) }
+        } else {
+            val list = _cities.value.toMutableList()
+            list.removeAll { it.id == cityId }
+            _cities.value = list
+            onComplete(true)
+        }
+    }
+
+    fun cleanOldDataAndLogs(retentionDays: Int, onComplete: (String) -> Unit) {
+        val cutoffTimestamp = System.currentTimeMillis() - (retentionDays.toLong() * 24L * 60L * 60L * 1000L)
+        val firestore = db
+        if (firestore != null) {
+            firestore.collection("activity_logs")
+                .whereLessThan("timestamp", cutoffTimestamp)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    if (snapshot.isEmpty) {
+                        onComplete("لم يتم العثور على سجلات قديمة قبل الفترة المحددة.")
+                        return@addOnSuccessListener
+                    }
+                    val batch = firestore.batch()
+                    snapshot.documents.forEach { doc ->
+                        batch.delete(doc.reference)
+                    }
+                    batch.commit().addOnSuccessListener {
+                        onComplete("تم تصفية وحذف ${snapshot.size()} من السجلات القديمة والمؤقتة بنجاح ✅")
+                    }.addOnFailureListener {
+                        onComplete("فشلت عملية تنظيف السجلات: ${it.localizedMessage}")
+                    }
+                }
+                .addOnFailureListener {
+                    onComplete("فشلت عملية الاستعلام: ${it.localizedMessage}")
+                }
+        } else {
+            val list = _activityLogs.value.toMutableList()
+            val originalSize = list.size
+            list.removeAll { it.timestamp < cutoffTimestamp }
+            _activityLogs.value = list
+            onComplete("تم تصفية العينات غير النشطة محلياً. السجلات المحذوفة: ${originalSize - list.size}")
         }
     }
 
